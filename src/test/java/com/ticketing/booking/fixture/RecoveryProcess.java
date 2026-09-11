@@ -17,7 +17,7 @@ public final class RecoveryProcess {
         if(!run.matches("[a-z0-9-]{8,50}") || !(mode.equals("crash")||mode.equals("recover"))){throw new IllegalArgumentException("Local test arguments");}
         var runtime=TestRuntime.instance();runtime.reset();runtime.fixedTime=BookingHarness.BASE;
         runtime.userA=Long.parseLong(args[2]);runtime.userB=Long.parseLong(args[3]);
-        Path evidence=Bootstrap.ROOT.resolve("evidence/BIZ-01-I-001").resolve(run);
+        Path evidence=Bootstrap.ROOT.resolve("evidence/BIZ-02-I-001").resolve(run);
         var json=new ObjectMapper();
         if(mode.equals("crash")){
             runtime.hooks.put("T1_COMMITTED",id->{

@@ -19,7 +19,7 @@ public class ApiErrors {
         if (failure.retryAfter()>0) { builder.header("Retry-After",Integer.toString(failure.retryAfter())); }
         return builder.body(error(failure.code()));
     }
-    @ExceptionHandler(HttpMessageNotReadableException.class)
+    @ExceptionHandler({HttpMessageNotReadableException.class,org.springframework.web.HttpMediaTypeNotSupportedException.class})
     ResponseEntity<Map<String,Object>> invalid(Exception ignored) { return ResponseEntity.badRequest().body(error("INVALID_ARGUMENT")); }
     @ExceptionHandler(Exception.class)
     ResponseEntity<Map<String,Object>> unavailable(Exception ignored) {
@@ -27,6 +27,8 @@ public class ApiErrors {
         return ResponseEntity.status(503).body(error("DEPENDENCY_UNAVAILABLE"));
     }
     private static Map<String,Object> error(String code) {
-        return Map.of("code",code,"message",code,"traceId",UUID.randomUUID().toString());
+        String message = code.equals("CLOSE_RESULT_UNKNOWN")
+            ? "关闭结果尚未确认，请查询本人订单或按原订单重试；不要认定取消失败。" : code;
+        return Map.of("code",code,"message",message,"traceId",UUID.randomUUID().toString());
     }
 }

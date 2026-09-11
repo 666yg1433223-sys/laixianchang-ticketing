@@ -318,9 +318,14 @@ class BookingRegressionTest {
     }
     void c17() throws Exception {
         var f=h.fixture("C17",1);var r=h.post(f,"c17-hold-overdue");assertEquals(202,r.status());
-        var before=h.query(r.id()).body().path("order");h.runtime.fixedTime=BASE.plusSeconds(601);scanner().scanOnce();allocation().process(r.id());
-        var after=h.query(r.id()).body();assertEquals("SUCCEEDED",after.path("status").asText());assertEquals(before,after.path("order"));
-        h.assertCounts(f,1,1,1,0);done("C17","overdue HOLD intentionally remains occupied: no payment, release or fake cancellation",f);
+        var before=h.query(r.id()).body().path("order");h.runtime.fixedTime=BASE.plusSeconds(601);
+        var expiry=h.app.getBean(com.ticketing.booking.recovery.OrderExpiryScanner.class);
+        expiry.scanOnce();scanner().scanOnce();allocation().process(r.id());expiry.scanOnce();
+        var after=h.query(r.id()).body();assertEquals("SUCCEEDED",after.path("status").asText());
+        assertEquals("EXPIRED",after.path("order").path("orderStatus").asText());
+        assertEquals(before.path("payExpiresAt"),after.path("order").path("payExpiresAt"));
+        assertEquals(before.path("orderId"),after.path("order").path("orderId"));
+        h.assertCounts(f,1,1,2,1);done("C17","BIZ-02 replaces intermediate limitation: expiry closes once, preserves history and returns one ticket",f);
     }
     void c18() throws Exception {
         var f=h.fixture("C18",1);h.runtime.direct=false;var r=h.post(f,"c18-paused-after");

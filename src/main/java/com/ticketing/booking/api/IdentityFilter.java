@@ -18,7 +18,7 @@ public class IdentityFilter extends OncePerRequestFilter {
     public IdentityFilter(RuntimeServices runtime) { this.runtime=runtime; }
     @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain)
             throws ServletException,IOException {
-        if (request.getRequestURI().startsWith("/v1/booking-requests")) {
+        if (request.getRequestURI().startsWith("/v1/booking-requests") || request.getRequestURI().startsWith("/v1/orders")) {
             try { request.setAttribute("booking.principal",runtime.authenticate(request.getHeader("Authorization"))); }
             catch (IllegalArgumentException denied) {
                 response.setStatus(401); response.setContentType("application/json");

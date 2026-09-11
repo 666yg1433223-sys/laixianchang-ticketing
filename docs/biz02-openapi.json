@@ -1,0 +1,658 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "BIZ-02 booking / unpaid close — isolated test identity only",
+    "version": "2.0.0",
+    "description": "No payment, paid state, waiting list, real login or online documentation endpoint. GET does not trigger close. HOLD may remain until scanner; cancel synchronously checks expiry using locked database time. Request SUCCEEDED history is immutable."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:18083"
+    }
+  ],
+  "security": [
+    {
+      "testBearer": []
+    }
+  ],
+  "paths": {
+    "/v1/booking-requests": {
+      "post": {
+        "operationId": "acceptBooking",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable acceptance, not proof of HOLD",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID / JSON / business fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required before argument processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Other owner's resource is indistinguishable from absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Window/idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Dual entry limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary failure. CLOSE_RESULT_UNKNOWN is not definite cancellation failure; query/retry same order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/booking-requests/{id}": {
+      "get": {
+        "operationId": "queryBooking",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Own application with current order lifecycle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID / JSON / business fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required before argument processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Other owner's resource is indistinguishable from absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary failure. CLOSE_RESULT_UNKNOWN is not definite cancellation failure; query/retry same order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders/{id}": {
+      "get": {
+        "operationId": "queryOrder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Own persistent order; no expiry side effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID / JSON / business fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required before argument processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Other owner's resource is indistinguishable from absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary failure. CLOSE_RESULT_UNKNOWN is not definite cancellation failure; query/retry same order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders/{id}/cancel": {
+      "post": {
+        "operationId": "cancelOrder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "description": "Only JSON {} accepted. At locked database time t<D => CANCELLED/USER_CANCELLED; t>=D => EXPIRED/PAYMENT_DEADLINE_EXCEEDED. Already closed returns identical persistent Order (including closedAt/reason), does not free newer owner.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyCancel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Closed order or same previous closure; returned stock and released quota atomically",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID / JSON / business fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required before argument processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Other owner's resource is indistinguishable from absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary failure. CLOSE_RESULT_UNKNOWN is not definite cancellation failure; query/retry same order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "testBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Private random token mapping only in test classpath and biz01-it; not production authentication"
+      }
+    },
+    "schemas": {
+      "Id": {
+        "type": "string",
+        "pattern": "^[1-9][0-9]{0,18}$",
+        "description": "Positive signed BIGINT decimal string; <=9223372036854775807"
+      },
+      "UtcMillis": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+      },
+      "EmptyCancel": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "BookingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "tierId",
+          "quantity"
+        ],
+        "properties": {
+          "sessionId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "tierId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "quantity": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          }
+        }
+      },
+      "Accepted": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "statusUrl",
+          "acceptedAt",
+          "processDeadline"
+        ],
+        "properties": {
+          "requestId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "statusUrl": {
+            "type": "string",
+            "pattern": "^/v1/booking-requests/[1-9][0-9]*$"
+          },
+          "acceptedAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "processDeadline": {
+            "$ref": "#/components/schemas/UtcMillis"
+          }
+        }
+      },
+      "EmbeddedOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "orderStatus",
+          "unitPriceCent",
+          "quantity",
+          "payableCent",
+          "currency",
+          "holdCreatedAt",
+          "payExpiresAt",
+          "closedAt",
+          "closeReason"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "orderStatus": {
+            "type": "string",
+            "enum": [
+              "HOLD",
+              "CANCELLED",
+              "EXPIRED"
+            ]
+          },
+          "unitPriceCent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "quantity": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "payableCent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY"
+            ]
+          },
+          "holdCreatedAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "payExpiresAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closeReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "USER_CANCELLED",
+              "PAYMENT_DEADLINE_EXCEEDED"
+            ]
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "orderStatus",
+          "unitPriceCent",
+          "quantity",
+          "payableCent",
+          "currency",
+          "holdCreatedAt",
+          "payExpiresAt",
+          "closedAt",
+          "closeReason",
+          "requestId",
+          "sessionId",
+          "tierId"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "orderStatus": {
+            "type": "string",
+            "enum": [
+              "HOLD",
+              "CANCELLED",
+              "EXPIRED"
+            ]
+          },
+          "unitPriceCent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "quantity": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "payableCent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY"
+            ]
+          },
+          "holdCreatedAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "payExpiresAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closeReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "USER_CANCELLED",
+              "PAYMENT_DEADLINE_EXCEEDED"
+            ]
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "tierId": {
+            "$ref": "#/components/schemas/Id"
+          }
+        }
+      },
+      "RequestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "status",
+          "reasonCode",
+          "acceptedAt",
+          "processDeadline",
+          "serverTime",
+          "order"
+        ],
+        "properties": {
+          "requestId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACCEPTED",
+              "SUCCEEDED",
+              "REJECTED",
+              "EXPIRED",
+              "PROCESSING_FAILED"
+            ]
+          },
+          "reasonCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "acceptedAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "processDeadline": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "serverTime": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmbeddedOrder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "traceId"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "traceId": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

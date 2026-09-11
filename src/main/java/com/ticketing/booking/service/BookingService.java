@@ -111,7 +111,7 @@ public class BookingService {
                 || !now.isBefore(instant(session.get("booking_close_at")))) { throw new ApiFailure(409,"SESSION_NOT_OPEN"); }
     }
     public Map<String,Object> query(long user,long request) {
-        var r=store.optional("SELECT r.*, o.id AS actual_order_id,o.status AS order_status,o.unit_price_cent,o.quantity AS order_quantity,o.payable_cent,o.currency,o.hold_created_at,o.pay_expires_at FROM booking_request r LEFT JOIN booking_order o ON o.request_id=r.id AND o.user_id=r.user_id WHERE r.id=? AND r.user_id=?",request,user);
+        var r=store.optional("SELECT r.*, o.id AS actual_order_id,o.status AS order_status,o.unit_price_cent,o.quantity AS order_quantity,o.payable_cent,o.currency,o.hold_created_at,o.pay_expires_at,o.closed_at,o.close_reason FROM booking_request r LEFT JOIN booking_order o ON o.request_id=r.id AND o.user_id=r.user_id WHERE r.id=? AND r.user_id=?",request,user);
         if (r == null) { throw new ApiFailure(404,"RESOURCE_NOT_FOUND"); }
         Map<String,Object> result=new LinkedHashMap<>();
         result.put("requestId",Long.toString(request)); result.put("status",r.get("status"));
@@ -120,9 +120,12 @@ public class BookingService {
         result.put("order",null);
         if ("SUCCEEDED".equals(r.get("status"))) {
             if (r.get("actual_order_id")==null || number(r,"order_id")!=number(r,"actual_order_id")) { throw new IllegalStateException("ORDER_ASSOCIATION"); }
-            result.put("order",Map.of("orderId",Long.toString(number(r,"actual_order_id")),"orderStatus",r.get("order_status"),
+            Map<String,Object> order = new LinkedHashMap<>(Map.of("orderId",Long.toString(number(r,"actual_order_id")),"orderStatus",r.get("order_status"),
                 "unitPriceCent",r.get("unit_price_cent"),"quantity",r.get("order_quantity"),"payableCent",r.get("payable_cent"),
                 "currency",r.get("currency"),"holdCreatedAt",time(r.get("hold_created_at")),"payExpiresAt",time(r.get("pay_expires_at"))));
+            order.put("closedAt",r.get("closed_at")==null?null:time(r.get("closed_at")));
+            order.put("closeReason",r.get("close_reason"));
+            result.put("order",order);
         }
         return result;
     }
