@@ -28,7 +28,8 @@ public class ApiErrors {
     }
     private static Map<String,Object> error(String code) {
         String message = code.equals("CLOSE_RESULT_UNKNOWN")
-            ? "关闭结果尚未确认，请查询本人订单或按原订单重试；不要认定取消失败。" : code;
+            ? "关闭结果尚未确认，请查询本人订单或按原订单重试；不要认定取消失败。"
+            : code.equals("PAYMENT_ACCEPTANCE_UNKNOWN") ? "模拟付款受理结果尚未确认，请沿原幂等键重试或按原尝试 ID 查询，勿换键。" : code;
         return Map.of("code",code,"message",message,"traceId",UUID.randomUUID().toString());
     }
 }

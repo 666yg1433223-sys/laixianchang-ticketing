@@ -17,6 +17,8 @@ public final class TestRuntime implements RuntimeServices {
     public final java.util.Set<String> observedRedisKeys=ConcurrentHashMap.newKeySet();
     public volatile boolean direct = true;
     public volatile boolean recovery = true;
+    public volatile boolean simulation = true;
+    public volatile SimulationPlan plan = new SimulationPlan("SUCCESS",100);
     public volatile Instant fixedTime;
     public volatile long userA = 1;
     public volatile long userB = 2;
@@ -32,7 +34,9 @@ public final class TestRuntime implements RuntimeServices {
     }
     public static TestRuntime instance() { return enabled ? INSTANCE : null; }
     public String token(boolean second) { return second ? tokenB : tokenA; }
-    public void reset() { hooks.clear(); direct = true; recovery = false; fixedTime = null; }
+    public void reset() { hooks.clear(); direct = true; recovery = false; fixedTime = null; simulation=true; plan=new SimulationPlan("SUCCESS",100); }
+    @Override public boolean simulatorEnabled() { return simulation; }
+    @Override public SimulationPlan simulationPlan() { return plan; }
     @Override public long authenticate(String header) {
         if (("Bearer " + tokenA).equals(header)) { return userA; }
         if (("Bearer " + tokenB).equals(header)) { return userB; }

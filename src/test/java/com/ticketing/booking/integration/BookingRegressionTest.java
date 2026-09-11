@@ -310,7 +310,7 @@ class BookingRegressionTest {
         byte[] hash=java.security.MessageDigest.getInstance("SHA-256").digest(("v1|booking|user="+f.userA()+"|session="+f.session()+"|tier="+f.tier()+"|quantity=1").getBytes(StandardCharsets.UTF_8));
         h.jdbc.update("INSERT INTO booking_request(id,user_id,session_id,tier_id,quantity,idempotency_key,payload_hash,status,reason_code,accepted_at,process_deadline,finished_at) VALUES(?,?,?,?,1,'fixture-high-id',?,'EXPIRED','PROCESS_DEADLINE_EXCEEDED',?,?,?)",
             sentinel,f.userA(),f.session(),f.tier(),hash,sqlTime(BASE.minusSeconds(121)),sqlTime(BASE.minusSeconds(1)),sqlTime(BASE));
-        long event=h.store.insert("INSERT INTO outbox_event(event_type,aggregate_id,payload,state,created_at,finished_at) VALUES('BOOKING_REQUESTED',?,JSON_OBJECT(),'DONE',?,?)",sentinel,sqlTime(BASE.minusSeconds(121)),sqlTime(BASE));
+        long event=h.store.insert("INSERT INTO outbox_event(event_type,aggregate_id,booking_request_id,payload,state,created_at,finished_at) VALUES('BOOKING_REQUESTED',?,?,JSON_OBJECT(),'DONE',?,?)",sentinel,sentinel,sqlTime(BASE.minusSeconds(121)),sqlTime(BASE));
         h.jdbc.update("UPDATE outbox_event SET payload=? WHERE id=?",h.json.writeValueAsString(Map.of("schemaVersion",1,"eventId",Long.toString(event),"eventType","BOOKING_REQUESTED","requestId",Long.toString(sentinel),"createdAt",time(BASE.minusSeconds(121)),"traceId","fixture-high-id")),event);
         var r=h.post(f,"c16-large-generated");assertEquals(202,r.status());assertTrue(r.id()>9007199254740992L);
         assertTrue(r.body().path("requestId").isTextual());assertEquals(Long.toString(r.id()),h.query(r.id()).body().path("requestId").asText());

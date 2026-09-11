@@ -62,6 +62,19 @@ public class OrderCloseService {
             throw new IllegalStateException("CLOSE_REQUIRES_TRANSACTION");
         }
         if (cancelRequested && actor == null) { throw new IllegalArgumentException("CANCEL_REQUIRES_ACTOR"); }
+        var locked = lockOrder(orderId, actor);
+        String state = (String) locked.order().get("status");
+        if ("CANCELLED".equals(state) || "EXPIRED".equals(state)) { return view(locked.order()); }
+        runtime.at("CLOSE_LOCKS_ACQUIRED", orderId);
+        return closeLocked(locked, runtime.afterLocks(store.jdbc()), cancelRequested);
+    }
+
+    public record LockedOrder(Map<String,Object> inventory, Map<String,Object> quota,
+            Map<String,Object> request, Map<String,Object> order) { }
+
+    /** Acquires the common business prefix only; caller takes attempt/event locks next, then reads time. */
+    public LockedOrder lockOrder(long orderId, Long actor) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) { throw new IllegalStateException("ORDER_LOCK_REQUIRES_TX"); }
         var route = store.required("SELECT request_id,user_id,session_id,tier_id FROM booking_order WHERE id=?", orderId);
         long user = number(route, "user_id"), session = number(route, "session_id"), tier = number(route, "tier_id");
         long requestId = number(route, "request_id");
@@ -76,12 +89,21 @@ public class OrderCloseService {
             throw new IllegalStateException("CLOSE_IMMUTABLE_ROUTE_CHANGED");
         }
         if (actor != null && actor != user) { throw new ApiFailure(404, "RESOURCE_NOT_FOUND"); }
-        // Terminal history wins before checking the current quota: it might now belong to O2.
-        String state = (String) order.get("status");
+        return new LockedOrder(inventory, quota, request, order);
+    }
+
+    /** Already-locked core: never reacquire the business prefix after an attempt/outbox lock. */
+    public Map<String,Object> closeLocked(LockedOrder locked, Instant now, boolean cancelRequested) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) { throw new IllegalStateException("CLOSE_REQUIRES_TRANSACTION"); }
+        var order=locked.order(); var inventory=locked.inventory(); var quota=locked.quota(); var request=locked.request();
+        long orderId=number(order,"id"), user=number(order,"user_id"), session=number(order,"session_id"), tier=number(order,"tier_id");
+        String state=(String)order.get("status");
         if ("CANCELLED".equals(state) || "EXPIRED".equals(state)) { return view(order); }
+        if ("PAID".equals(state)) {
+            if (cancelRequested) { throw new ApiFailure(409,"PAID_CANCEL_DISABLED"); }
+            return view(order);
+        }
         if (!"HOLD".equals(state)) { throw new IllegalStateException("CLOSE_UNSUPPORTED_STATE"); }
-        runtime.at("CLOSE_LOCKS_ACQUIRED", orderId);
-        Instant now = runtime.afterLocks(store.jdbc());
         Instant deadline = instant(order.get("pay_expires_at"));
         if (!cancelRequested && now.isBefore(deadline)) { return view(order); }
         if (!"SUCCEEDED".equals(request.get("status")) || number(request, "order_id") != orderId
@@ -127,6 +149,13 @@ public class OrderCloseService {
         result.put("payExpiresAt", time(row.get("pay_expires_at")));
         result.put("closedAt", row.get("closed_at") == null ? null : time(row.get("closed_at")));
         result.put("closeReason", row.get("close_reason"));
+        paymentLinks(row,result);
         return result;
+    }
+
+    public static void paymentLinks(Map<String,Object> row, Map<String,Object> result) {
+        result.put("currentAttemptId",row.get("current_attempt_id")==null?null:Long.toString(number(row,"current_attempt_id")));
+        result.put("paidAttemptId",row.get("paid_attempt_id")==null?null:Long.toString(number(row,"paid_attempt_id")));
+        result.put("paidAt",row.get("paid_at")==null?null:time(row.get("paid_at")));
     }
 }

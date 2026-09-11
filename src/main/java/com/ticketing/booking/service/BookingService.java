@@ -80,8 +80,8 @@ public class BookingService {
         Instant deadline=earlier(acceptedAt.plusSeconds(120),instant(lockedSession.get("booking_close_at")));
         long request=store.insert("INSERT INTO booking_request(user_id,session_id,tier_id,quantity,idempotency_key,payload_hash,status,accepted_at,process_deadline) VALUES(?,?,?,1,?,?,'ACCEPTED',?,?)",
             user,session,tier,key,hash,sqlTime(acceptedAt),sqlTime(deadline));
-        long event=store.insert("INSERT INTO outbox_event(event_type,aggregate_id,payload,next_attempt_at,created_at) VALUES('BOOKING_REQUESTED',?,JSON_OBJECT(),?,?)",
-            request,sqlTime(acceptedAt),sqlTime(acceptedAt));
+        long event=store.insert("INSERT INTO outbox_event(event_type,aggregate_id,booking_request_id,payload,next_attempt_at,created_at) VALUES('BOOKING_REQUESTED',?,?,JSON_OBJECT(),?,?)",
+            request,request,sqlTime(acceptedAt),sqlTime(acceptedAt));
         try {
             String payload=json.writeValueAsString(Map.of("schemaVersion",1,"eventId",Long.toString(event),
                 "eventType","BOOKING_REQUESTED","requestId",Long.toString(request),"createdAt",time(acceptedAt),"traceId",UUID.randomUUID().toString()));
@@ -111,7 +111,7 @@ public class BookingService {
                 || !now.isBefore(instant(session.get("booking_close_at")))) { throw new ApiFailure(409,"SESSION_NOT_OPEN"); }
     }
     public Map<String,Object> query(long user,long request) {
-        var r=store.optional("SELECT r.*, o.id AS actual_order_id,o.status AS order_status,o.unit_price_cent,o.quantity AS order_quantity,o.payable_cent,o.currency,o.hold_created_at,o.pay_expires_at,o.closed_at,o.close_reason FROM booking_request r LEFT JOIN booking_order o ON o.request_id=r.id AND o.user_id=r.user_id WHERE r.id=? AND r.user_id=?",request,user);
+        var r=store.optional("SELECT r.*, o.id AS actual_order_id,o.status AS order_status,o.unit_price_cent,o.quantity AS order_quantity,o.payable_cent,o.currency,o.hold_created_at,o.pay_expires_at,o.closed_at,o.close_reason,o.current_attempt_id,o.paid_attempt_id,o.paid_at FROM booking_request r LEFT JOIN booking_order o ON o.request_id=r.id AND o.user_id=r.user_id WHERE r.id=? AND r.user_id=?",request,user);
         if (r == null) { throw new ApiFailure(404,"RESOURCE_NOT_FOUND"); }
         Map<String,Object> result=new LinkedHashMap<>();
         result.put("requestId",Long.toString(request)); result.put("status",r.get("status"));
@@ -125,6 +125,7 @@ public class BookingService {
                 "currency",r.get("currency"),"holdCreatedAt",time(r.get("hold_created_at")),"payExpiresAt",time(r.get("pay_expires_at"))));
             order.put("closedAt",r.get("closed_at")==null?null:time(r.get("closed_at")));
             order.put("closeReason",r.get("close_reason"));
+            OrderCloseService.paymentLinks(r,order);
             result.put("order",order);
         }
         return result;

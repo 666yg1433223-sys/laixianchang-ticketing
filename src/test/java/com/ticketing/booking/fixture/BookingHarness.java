@@ -41,7 +41,7 @@ public final class BookingHarness implements AutoCloseable {
 
     public BookingHarness(String runId) throws Exception {
         this.runId=runId;
-        evidence=Bootstrap.ROOT.resolve("evidence/BIZ-02-I-001").resolve(runId);
+        evidence=Bootstrap.ROOT.resolve("evidence/BIZ-03-I-001").resolve(runId);
         Files.createDirectories(evidence);
         if(Files.exists(evidence.resolve("manifest.json"))) { throw new IllegalStateException("Used runId"); }
         runtime.reset(); runtime.fixedTime=BASE; runtime.observedRedisKeys.clear();
@@ -52,7 +52,7 @@ public final class BookingHarness implements AutoCloseable {
     }
     public void startApp() {
         SpringApplication application=new SpringApplication(BookingApplication.class);
-        app=application.run("--spring.profiles.active=biz01-it","--biz.runId="+runId);
+        app=application.run("--spring.profiles.active=biz01-it","--biz.runId="+runId,"--biz.simulation.enabled=true");
     }
     public void stopApp() { if(app!=null){app.close(); app=null;} }
     public Fixture fixture(String name,int capacity) throws Exception {
@@ -90,24 +90,26 @@ public final class BookingHarness implements AutoCloseable {
         data.put("O",jdbc.queryForList("SELECT * FROM booking_order WHERE session_id=? AND user_id IN (?,?) ORDER BY id",f.session(),f.userA(),f.userB()));
         data.put("Q",jdbc.queryForList("SELECT * FROM user_session_quota WHERE session_id=? AND user_id IN (?,?) ORDER BY user_id",f.session(),f.userA(),f.userB()));
         data.put("L",jdbc.queryForList("SELECT * FROM inventory_ledger WHERE tier_id IN (?,?) ORDER BY id",f.tier(),f.otherTier()));
-        data.put("E",jdbc.queryForList("SELECT e.* FROM outbox_event e JOIN booking_request r ON r.id=e.aggregate_id WHERE r.session_id=? AND r.user_id IN (?,?) ORDER BY e.id",f.session(),f.userA(),f.userB()));
+        data.put("E",jdbc.queryForList("SELECT e.* FROM outbox_event e JOIN booking_request r ON r.id=e.booking_request_id WHERE r.session_id=? AND r.user_id IN (?,?) ORDER BY e.id",f.session(),f.userA(),f.userB()));
+        data.put("P",jdbc.queryForList("SELECT * FROM payment_attempt WHERE session_id=? AND user_id IN (?,?) ORDER BY id",f.session(),f.userA(),f.userB()));
+        data.put("PE",jdbc.queryForList("SELECT e.* FROM outbox_event e JOIN payment_attempt a ON a.id=e.payment_attempt_id WHERE a.session_id=? AND a.user_id IN (?,?) ORDER BY e.id",f.session(),f.userA(),f.userB()));
         data.put("inventory",jdbc.queryForList("SELECT id,capacity,available FROM ticket_tier WHERE id IN (?,?) ORDER BY id",f.tier(),f.otherTier()));
         return data;
     }
     public void assertCounts(Fixture f,int requests,int orders,int ledger,int available) {
         assertEquals(requests,jdbc.queryForObject("SELECT COUNT(*) FROM booking_request WHERE session_id=?",Integer.class,f.session()));
-        assertEquals(requests,jdbc.queryForObject("SELECT COUNT(*) FROM outbox_event e JOIN booking_request r ON r.id=e.aggregate_id WHERE r.session_id=?",Integer.class,f.session()));
+        assertEquals(requests,jdbc.queryForObject("SELECT COUNT(*) FROM outbox_event e JOIN booking_request r ON r.id=e.booking_request_id WHERE r.session_id=?",Integer.class,f.session()));
         assertEquals(orders,jdbc.queryForObject("SELECT COUNT(*) FROM booking_order WHERE session_id=?",Integer.class,f.session()));
         assertEquals(ledger,jdbc.queryForObject("SELECT COUNT(*) FROM inventory_ledger WHERE tier_id IN (?,?)",Integer.class,f.tier(),f.otherTier()));
         assertEquals(available,jdbc.queryForObject("SELECT available FROM ticket_tier WHERE id=?",Integer.class,f.tier()));
-        int held=jdbc.queryForObject("SELECT COUNT(*) FROM booking_order WHERE session_id=? AND status='HOLD'",Integer.class,f.session());
+        int held=jdbc.queryForObject("SELECT COUNT(*) FROM booking_order WHERE session_id=? AND status IN ('HOLD','PAID')",Integer.class,f.session());
         assertEquals(held,jdbc.queryForObject("SELECT COUNT(*) FROM user_session_quota WHERE session_id=? AND owner_type='ORDER'",Integer.class,f.session()));
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ticket_tier WHERE id IN (?,?) AND available<0",Integer.class,f.tier(),f.otherTier()));
         assertEquals(held,jdbc.queryForObject("SELECT SUM(capacity-available) FROM ticket_tier WHERE id IN (?,?)",Integer.class,f.tier(),f.otherTier()));
         assertEquals(-held,jdbc.queryForObject("SELECT COALESCE(SUM(delta),0) FROM inventory_ledger WHERE tier_id IN (?,?)",Integer.class,f.tier(),f.otherTier()));
         for(long tier:List.of(f.tier(),f.otherTier())) {
             assertEquals(jdbc.queryForObject("SELECT capacity-available FROM ticket_tier WHERE id=?",Integer.class,tier),
-                jdbc.queryForObject("SELECT COUNT(*) FROM booking_order WHERE tier_id=? AND status='HOLD'",Integer.class,tier));
+                jdbc.queryForObject("SELECT COUNT(*) FROM booking_order WHERE tier_id=? AND status IN ('HOLD','PAID')",Integer.class,tier));
         }
         for(var request:jdbc.queryForList("SELECT * FROM booking_request WHERE session_id=?",f.session())){
             long requestId=number(request,"id");
@@ -117,8 +119,12 @@ public final class BookingHarness implements AutoCloseable {
             if(status.equals("SUCCEEDED")){
                 var order=jdbc.queryForMap("SELECT * FROM booking_order WHERE request_id=?",requestId);
                 assertEquals(number(request,"order_id"),number(order,"id"));
-                boolean holding="HOLD".equals(order.get("status"));
+                boolean holding=Set.of("HOLD","PAID").contains(order.get("status"));
                 Long owner=jdbc.queryForObject("SELECT owner_id FROM user_session_quota WHERE user_id=? AND session_id=?",Long.class,number(request,"user_id"),f.session());
+                if("PAID".equals(order.get("status"))) {
+                    assertNotNull(order.get("paid_at")); assertEquals(number(order,"current_attempt_id"),number(order,"paid_attempt_id"));
+                    assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM payment_attempt WHERE id=? AND order_id=? AND user_id=? AND settlement_status=\'APPLIED\' AND result_status=\'SUCCESS\' AND amount_cent=? AND currency=?",Integer.class,number(order,"paid_attempt_id"),number(order,"id"),number(order,"user_id"),number(order,"payable_cent"),order.get("currency")));
+                }
                 if(holding){
                     assertEquals(number(order,"id"),owner);assertNull(order.get("closed_at"));assertNull(order.get("close_reason"));
                 }else{
@@ -165,6 +171,11 @@ public final class BookingHarness implements AutoCloseable {
         for(long id:requests){
             var orders=jdbc.queryForList("SELECT id FROM booking_order WHERE request_id=?",Long.class,id);
             for(long order:orders){
+                var attempts=jdbc.queryForList("SELECT id FROM payment_attempt WHERE order_id=? AND user_id IN (?,?)",Long.class,order,f.userA(),f.userB());
+                for(long attempt:attempts) {
+                    jdbc.update("DELETE FROM outbox_event WHERE payment_attempt_id=? AND event_type='PAYMENT_RESULT_RECORDED'",attempt);
+                    one(jdbc.update("DELETE FROM payment_attempt WHERE id=? AND order_id=?",attempt,order));
+                }
                 jdbc.update("DELETE FROM inventory_ledger WHERE order_id=? AND tier_id IN (?,?)",order,f.tier(),f.otherTier());
             }
         }

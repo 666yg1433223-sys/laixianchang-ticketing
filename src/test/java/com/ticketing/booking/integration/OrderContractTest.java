@@ -32,7 +32,7 @@ class OrderContractTest {
         if (schema.path("type").isArray()) { schema.get("type").forEach(t -> types.add(t.asText())); }
         else { types.add(schema.path("type").asText()); }
         String actual = value.isNull() ? "null" : value.isObject() ? "object" : value.isTextual() ? "string"
-                : value.isIntegralNumber() ? "integer" : "unsupported";
+                : value.isIntegralNumber() ? "integer" : value.isBoolean() ? "boolean" : "unsupported";
         assertTrue(types.contains(actual), "Type mismatch " + schema + " / " + value);
         if (schema.has("enum")) {
             boolean found = false; for (var choice : schema.get("enum")) { if (choice.equals(value)) { found = true; } }
@@ -62,7 +62,7 @@ class OrderContractTest {
     }
 
     @Test void staticContractMatchesActualRoutesBodiesAndDatabaseChecks() throws Exception {
-        spec = json.readTree(Files.readString(Bootstrap.ROOT.resolve("docs/biz02-openapi.json")));
+        spec = json.readTree(Files.readString(Bootstrap.ROOT.resolve("docs/biz03-openapi.json")));
         assertEquals("3.1.0", spec.path("openapi").asText());
         try (var h = new BookingHarness(System.getProperty("biz.runId") + "-contract")) {
             Set<String> expected = new TreeSet<>();
@@ -77,7 +77,7 @@ class OrderContractTest {
                     }
                 }
             });
-            assertEquals(expected, actual); assertEquals(4, actual.size());
+            assertEquals(expected, actual); assertEquals(6, actual.size());
             var f = h.fixture("API", 1);
             var accepted = h.post(f, "api-contract-key");
             response("/v1/booking-requests", "post", accepted);

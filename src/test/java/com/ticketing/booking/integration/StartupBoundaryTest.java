@@ -32,7 +32,7 @@ class StartupBoundaryTest {
                 assertPortFree();outcomes.add(Map.of("case",mode,"startupRejected",true,"port18083Free",true));
             }finally{TestRuntime.enabled=true;}
         }
-        Path evidence=Bootstrap.ROOT.resolve("evidence/BIZ-02-I-001").resolve(run);Files.createDirectories(evidence);
+        Path evidence=Bootstrap.ROOT.resolve("evidence/BIZ-03-I-001").resolve(run);Files.createDirectories(evidence);
         new com.fasterxml.jackson.databind.ObjectMapper().writeValue(evidence.resolve("startup-negative-contexts.json").toFile(),outcomes);
     }
 }
