@@ -1,0 +1,7 @@
+.local/
+.m2/
+target/
+evidence/
+*.log
+.idea/
+*.iml
