@@ -14,7 +14,7 @@ class PaymentMigrationTest {
         var json=new ObjectMapper().findAndRegisterModules();
         var env=MigrationTest.environment();
         env.setProperty("biz.runId",env.getProperty("biz.runId")+"-v3");
-        var dir=Bootstrap.ROOT.resolve("evidence/BIZ-03-I-001").resolve(env.getProperty("biz.runId"));
+        var dir=Bootstrap.evidenceDirectory(env.getProperty("biz.runId"));
         Files.createDirectories(dir);
         var secrets=json.readTree(Files.readString(Bootstrap.ROOT.resolve(".local/credentials.json")));
         try(var probe=Bootstrap.pool("ticketing_biz01_it_app",secrets.path("itApp").asText(),secrets.path("trustPassword").asText(),1)) {
@@ -22,10 +22,15 @@ class PaymentMigrationTest {
             var history=jdbc.queryForList("SELECT * FROM flyway_schema_history WHERE version IN ('1','2') ORDER BY installed_rank");
             assertEquals(2,history.size()); assertEquals(-576261309,history.get(0).get("checksum")); assertEquals(243374070,history.get(1).get("checksum"));
             boolean first=jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version='3'",Integer.class)==0;
+            boolean firstV4=jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version='4'",Integer.class)==0;
+            var historyV3=jdbc.queryForList("SELECT * FROM flyway_schema_history WHERE version='3' ORDER BY installed_rank");
+            if(!first) assertEquals(2021319884,historyV3.get(0).get("checksum"));
             Map<String,Object> old=new LinkedHashMap<>();
             for(String table:List.of("app_user","event","event_session","ticket_tier","booking_request","booking_order","user_session_quota","inventory_ledger","outbox_event"))
                 old.put(table,jdbc.queryForList("SELECT * FROM "+table));
+            if(!first) old.put("payment_attempt",jdbc.queryForList("SELECT * FROM payment_attempt"));
             json.writeValue(dir.resolve("V3-old-data-before.json").toFile(),old);
+            if(firstV4 && !first) json.writeValue(dir.resolve("V4-ten-tables-before.json").toFile(),Map.of("tables",old,"history",jdbc.queryForList("SELECT * FROM flyway_schema_history ORDER BY installed_rank")));
             long user=0,event=0,session=0,tier=0,request=0,outbox=0;
             if(first) {
                 String prefix=env.getProperty("biz.runId")+":v3";
@@ -38,8 +43,16 @@ class PaymentMigrationTest {
                 json.writeValue(dir.resolve("V3-exact-seed-manifest.json").toFile(),Map.of("user",user,"event",event,"session",session,"tier",tier,"request",request,"outbox",outbox,"prefix",prefix));
             }
             try(var ready=Bootstrap.prepare(env)) {
-                assertEquals(11,jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class));
+                assertEquals(12,jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class));
                 assertEquals(history,jdbc.queryForList("SELECT * FROM flyway_schema_history WHERE version IN ('1','2') ORDER BY installed_rank"));
+                if(!first) assertEquals(historyV3,jdbc.queryForList("SELECT * FROM flyway_schema_history WHERE version='3' ORDER BY installed_rank"));
+                assertEquals(2021319884,jdbc.queryForObject("SELECT checksum FROM flyway_schema_history WHERE version='3'",Integer.class));
+                assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version='4' AND success=1",Integer.class));
+                if(firstV4) {
+                    assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM outbox_event WHERE recovery_generation<>0",Integer.class));
+                    assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM sim_payment_operation",Integer.class));
+                }
+                assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM outbox_event WHERE event_type='BOOKING_REQUESTED' AND recovery_generation<>0",Integer.class));
                 assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM outbox_event WHERE event_type='BOOKING_REQUESTED' AND (booking_request_id IS NULL OR booking_request_id<>aggregate_id OR payment_attempt_id IS NOT NULL)",Integer.class));
                 if(first) {
                     assertEquals(request,jdbc.queryForObject("SELECT booking_request_id FROM outbox_event WHERE id=?",Long.class,outbox));
@@ -58,8 +71,12 @@ class PaymentMigrationTest {
                     for(int i=0;i<rows.size();i++) for(var field:rows.get(i).entrySet()) assertEquals(json.valueToTree(field.getValue()),json.valueToTree(after.get(i).get(field.getKey())));
                 }
                 json.writeValue(dir.resolve("V3-migration-verified.json").toFile(),Map.of("firstMigration",first,"oldDataUnchanged",true,"backfillVerified",true,"seedCleaned",true,"history",jdbc.queryForList("SELECT * FROM flyway_schema_history ORDER BY installed_rank")));
+                json.writeValue(dir.resolve("V4-migration-verified.json").toFile(),Map.of("firstMigration",firstV4,"oldColumnsUnchanged",true,"oldTableCount",old.size(),"newGenerationInitiallyZero",firstV4,"auditInitiallyEmpty",firstV4,"totalTables",12,"history",jdbc.queryForList("SELECT * FROM flyway_schema_history ORDER BY installed_rank")));
             }
-            try(var repeat=Bootstrap.prepare(env)) { assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version='3' AND success=1",Integer.class)); }
+            try(var repeat=Bootstrap.prepare(env)) {
+                assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version='3' AND success=1",Integer.class));
+                assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version='4' AND success=1",Integer.class));
+            }
             try(var paths=Files.list(dir)) {
                 var records=paths.filter(p->p.getFileName().toString().startsWith("migration-")).sorted().toList();
                 assertEquals(2,records.size());

@@ -1,0 +1,253 @@
+# 在 IntelliJ IDEA 的 HTTP Client 中逐条运行；先填下面的手机号、验证码、token 和 ID 占位符。
+# 启动：pwsh -File D:\Codex\ticketing\scripts\run-local.ps1 -Action Start
+# 发验证码后获取本地模拟短信：
+# pwsh -File D:\Codex\ticketing\scripts\run-local.ps1 -Action Code -Phone YOUR_PHONE
+# 验证码有效期 120 秒；发送遇到 429 时按响应 Retry-After 等待，不连续点击重发。
+# 管理员手机号取当前 biz.local.admin-phone 配置；普通手机号不能通过请求指定角色。
+# token、验证码只在本机临时填写，不把填有凭据的文件提交到 Git。
+# 每次新业务操作换一个幂等键；同一操作超时重试保留原键与原请求体。
+# 请按需逐条执行：付款、取消和候补是不同分支，不要直接运行整个文件。
+
+@baseUrl = http://127.0.0.1:18082
+@phone = REPLACE_WITH_USER_PHONE
+@code = REPLACE_WITH_SIX_DIGIT_CODE
+@adminPhone = REPLACE_WITH_CONFIGURED_ADMIN_PHONE
+@adminCode = REPLACE_WITH_ADMIN_CODE
+@userToken = REPLACE_WITH_USER_TOKEN
+@adminToken = REPLACE_WITH_ADMIN_TOKEN
+@waitlistToken = REPLACE_WITH_SECOND_USER_TOKEN
+@eventId = REPLACE_WITH_EVENT_ID
+@sessionId = REPLACE_WITH_SESSION_ID
+@tierId = REPLACE_WITH_TIER_ID
+@requestId = REPLACE_WITH_REQUEST_ID
+@orderId = REPLACE_WITH_ORDER_ID
+@attemptId = REPLACE_WITH_ATTEMPT_ID
+@waitlistId = REPLACE_WITH_WAITLIST_ID
+@failureEventId = REPLACE_WITH_FAILURE_EVENT_ID
+@operationId = REPLACE_WITH_RECOVERY_OPERATION_UUID
+@bookingKey = http-booking-001
+@paymentKey = http-payment-001
+@waitlistKey = http-waitlist-001
+@recoveryKey = http-recovery-001
+
+### 普通用户：发送本地验证码（响应只有发送结果，不含 code）
+POST {{baseUrl}}/v1/auth/code
+Content-Type: application/json
+
+{"phone":"{{phone}}"}
+
+### 普通用户：登录；将响应 token 填入 userToken
+# 第二个普通用户也使用这两条请求登录，把其 token 单独填入 waitlistToken。
+POST {{baseUrl}}/v1/auth/login
+Content-Type: application/json
+
+{"phone":"{{phone}}","code":"{{code}}"}
+
+### 当前用户；返回 id、nickname、role
+GET {{baseUrl}}/v1/auth/me
+Authorization: Bearer {{userToken}}
+
+### 管理员：发送验证码，再用 run-local Code 按 adminPhone 获取
+POST {{baseUrl}}/v1/auth/code
+Content-Type: application/json
+
+{"phone":"{{adminPhone}}"}
+
+### 管理员：登录；将响应 token 填入 adminToken，并确认 user.role 为 ADMIN
+POST {{baseUrl}}/v1/auth/login
+Content-Type: application/json
+
+{"phone":"{{adminPhone}}","code":"{{adminCode}}"}
+
+### 公开活动列表；items 中的 eventId 可直接用于详情
+GET {{baseUrl}}/v1/events?page=1&size=12
+
+### 公开活动详情；sessions 中包含 sessionId 与开售时间
+GET {{baseUrl}}/v1/events/{{eventId}}
+
+### 公开场次票档；items 中的 tierId 用于购票，referenceAvailable 是展示参考库存
+GET {{baseUrl}}/v1/sessions/{{sessionId}}/ticket-tiers
+
+### 管理员活动列表；包含草稿场次和票档
+GET {{baseUrl}}/v1/admin/events?page=1&size=10
+Authorization: Bearer {{adminToken}}
+
+### 管理员创建活动；把响应 eventId 填入变量
+POST {{baseUrl}}/v1/admin/events
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title": "本地演出体验场",
+  "description": "票务流程演示，无真实资金",
+  "venueText": "本地测试会场"
+}
+
+### 管理员修改活动资料
+PATCH {{baseUrl}}/v1/admin/events/{{eventId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"title":"本地演出体验场（更新）","venueText":"一号测试厅"}
+
+### 管理员创建草稿场次；自动设为现在可售、1 小时后停售、2 小时后开场
+# 把响应 sessionId 填入变量。时间为 UTC，毫秒精度，满足 开售 < 停售 < 开场。
+< {%
+  const now = Date.now();
+  request.variables.set("bookingOpenAt", new Date(now - 60000).toISOString());
+  request.variables.set("bookingCloseAt", new Date(now + 3600000).toISOString());
+  request.variables.set("startAt", new Date(now + 7200000).toISOString());
+%}
+POST {{baseUrl}}/v1/admin/sessions
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "eventId": "{{eventId}}",
+  "startAt": "{{startAt}}",
+  "bookingOpenAt": "{{bookingOpenAt}}",
+  "bookingCloseAt": "{{bookingCloseAt}}"
+}
+
+### 管理员创建票档；把响应 tierId 填入变量；金额单位为分，9900 = 99 元
+# 容量 1 便于用两个普通用户演示“占票 → 候补 → 取消 → 补位”。
+POST {{baseUrl}}/v1/admin/ticket-tiers
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "sessionId": "{{sessionId}}",
+  "name": "普通票",
+  "areaLabel": "A 区",
+  "capacity": 1,
+  "unitPriceCent": 9900
+}
+
+### 管理员修改草稿票档；发布后这些字段会被冻结
+PATCH {{baseUrl}}/v1/admin/ticket-tiers/{{tierId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"name":"普通票 A 区","areaLabel":"A 区","unitPriceCent":9900}
+
+### 管理员发布场次；草稿至少已有一档票，成功响应 state 为 OPEN
+POST {{baseUrl}}/v1/admin/sessions/{{sessionId}}/publish
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{}
+
+### 管理员暂停售卖；成功响应 state 为 PAUSED
+POST {{baseUrl}}/v1/admin/sessions/{{sessionId}}/pause
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{}
+
+### 管理员恢复售卖；成功响应 state 为 OPEN
+POST {{baseUrl}}/v1/admin/sessions/{{sessionId}}/resume
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{}
+
+### 用户购票；只支持一张，ID 必须是 JSON 字符串
+# 202 表示已受理；将 requestId 填入变量，按 statusUrl 查询，尚未获得已付款订单。
+POST {{baseUrl}}/v1/booking-requests
+Authorization: Bearer {{userToken}}
+Idempotency-Key: {{bookingKey}}
+Content-Type: application/json
+
+{"sessionId":"{{sessionId}}","tierId":"{{tierId}}","quantity":1}
+
+### 查询本人购票申请；异步处理后再查
+# status=SUCCEEDED 时从 order.orderId 取得订单；order.orderStatus=HOLD 表示待付款。
+# ACCEPTED 继续查询；其他状态查看 reasonCode，不能把 200 HTTP 状态当作购票成功。
+GET {{baseUrl}}/v1/booking-requests/{{requestId}}
+Authorization: Bearer {{userToken}}
+
+### 本人订单列表
+GET {{baseUrl}}/v1/orders?page=1&size=12
+Authorization: Bearer {{userToken}}
+
+### 本人订单详情；付款前确认订单状态和 payExpiresAt
+GET {{baseUrl}}/v1/orders/{{orderId}}
+Authorization: Bearer {{userToken}}
+
+### 分支 A：提交本地模拟付款，不扣真实资金
+# 202 只表示付款申请已受理；把响应 attemptId 填入变量，按 statusUrl 查结果。
+POST {{baseUrl}}/v1/orders/{{orderId}}/payment-attempts
+Authorization: Bearer {{userToken}}
+Idempotency-Key: {{paymentKey}}
+Content-Type: application/json
+
+{}
+
+### 本人付款结果；同时查看 resultStatus、settlementStatus 与 orderStatus
+# 只有 orderStatus=PAID 才能显示已付款；需要时继续查询付款结果或订单详情。
+GET {{baseUrl}}/v1/payment-attempts/{{attemptId}}
+Authorization: Bearer {{userToken}}
+
+### 分支 B：取消尚未付款的本人订单；如需演示候补，先让第二用户加入候补再执行
+# 已付款订单不属于这个取消流程。成功释放名额后，候补扫描器会处理补位。
+POST {{baseUrl}}/v1/orders/{{orderId}}/cancel
+Authorization: Bearer {{userToken}}
+Content-Type: application/json
+
+{}
+
+### 第二用户加入候补；售票期间且该票档无可售库存时使用
+# 将响应 waitlistId 填入变量；此账号不能已有本场次有效订单或占位。
+POST {{baseUrl}}/v1/waitlist-entries
+Authorization: Bearer {{waitlistToken}}
+Idempotency-Key: {{waitlistKey}}
+Content-Type: application/json
+
+{"sessionId":"{{sessionId}}","tierId":"{{tierId}}","quantity":1}
+
+### 第二用户的候补列表
+GET {{baseUrl}}/v1/waitlist-entries?page=1&size=20
+Authorization: Bearer {{waitlistToken}}
+
+### 第二用户查询候补状态
+# 补位后返回 orderId；是待付款订单，不会自动扣款。
+# 付款时把此 orderId 和该用户 token 填入上方对应变量，使用新的 paymentKey。
+GET {{baseUrl}}/v1/waitlist-entries/{{waitlistId}}
+Authorization: Bearer {{waitlistToken}}
+
+### 第二用户取消等待中的候补
+POST {{baseUrl}}/v1/waitlist-entries/{{waitlistId}}/cancel
+Authorization: Bearer {{waitlistToken}}
+Content-Type: application/json
+
+{}
+
+### 管理员查看处理失败与积压；正常情况 items 可以为空
+# items[].eventId 是失败消息 ID，填入 failureEventId；不要填活动 eventId。
+# 同时记录 eventType、aggregateId 和 lastError，后续查询使用它们定位业务结果。
+GET {{baseUrl}}/v1/admin/processing-failures?page=1&size=20
+Authorization: Bearer {{adminToken}}
+
+### 管理员恢复一条实际失败消息；先处理失败原因，再填写原因并提交
+# BOOKING_REQUESTED / CATALOG_INVALIDATE 返回 eventId、accepted；异步重试后重新查询失败列表。
+# 购票恢复还需由原用户查询该 aggregateId 对应的购票申请，确认最终业务状态。
+# PAYMENT_RESULT_RECORDED 返回 operationId/statusUrl；将 operationId 填入变量查恢复结果。
+POST {{baseUrl}}/v1/admin/processing-failures/{{failureEventId}}/retry
+Authorization: Bearer {{adminToken}}
+Idempotency-Key: {{recoveryKey}}
+Content-Type: application/json
+
+{"reason":"已检查失败原因并恢复依赖，申请重试本地处理"}
+
+### 管理员查询付款恢复操作；仅用于上一请求确实返回 operationId 的情况
+# 查看 status 和 result；受理响应不代表付款已经完成。
+GET {{baseUrl}}/v1/admin/processing-failures/operations/{{operationId}}
+Authorization: Bearer {{adminToken}}
+
+### 使用结束后：普通用户退出登录；此后该 userToken 失效
+POST {{baseUrl}}/v1/auth/logout
+Authorization: Bearer {{userToken}}
+
+### 管理员退出登录
+POST {{baseUrl}}/v1/auth/logout
+Authorization: Bearer {{adminToken}}

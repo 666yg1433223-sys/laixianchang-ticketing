@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#174b3d">
+  <meta name="description" content="来现场，发现活动、在线预约、管理你的门票。">
+  <title>来现场 · 把喜欢，留给现场</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳至内容</a>
+  <header class="site-header"><div class="header-inner">
+    <a href="#discover" class="brand" aria-label="来现场首页"><span class="brand-mark" aria-hidden="true">来</span><span>来现场<small>LIVE IN THE MOMENT</small></span></a>
+    <nav aria-label="主导航"><a href="#discover" data-nav="discover">发现活动</a><a href="#tickets" data-nav="tickets">我的票夹</a><a href="#manage" data-nav="manage" id="manage-link" hidden>活动管理</a></nav>
+    <div id="account"></div>
+  </div></header>
+  <div class="demo-strip"><span class="live-dot"></span> 本地体验版 <span class="strip-divider">/</span> 验证码为本地模拟 · 所有付款均无真实资金</div>
+  <main id="main" tabindex="-1"></main>
+  <footer class="site-footer"><a href="#discover" class="footer-brand">来现场<span>把喜欢，留给现场。</span></a><p>每人每场限一张 · 候补成功后需手动付款<br>订单状态以最新查询结果为准</p><span class="footer-tag">MAKE A MEMORY.</span></footer>
+  <dialog id="modal" aria-labelledby="modal-title"><div class="dialog-shell"><button type="button" class="icon-btn close-modal" data-action="close-modal" aria-label="关闭弹窗">×</button><div id="modal-content"></div></div></dialog>
+  <div id="toasts" class="toasts" role="status" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

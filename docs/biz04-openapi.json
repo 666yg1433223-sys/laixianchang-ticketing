@@ -1,0 +1,1881 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "BIZ-04 scoped simulated-payment recovery",
+    "version": "4.0.0",
+    "description": "模拟支付，无真实资金。BIZ04目标契约已冻结，新增4路由尚未实现/验证；旧6路由保持BIZ03。内部入口须可信ADMIN+SIM_TEST_OPERATOR、biz01-it、验证测试classpath、显式管理开关和本轮服务器manifest。"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:18083"
+    }
+  ],
+  "security": [
+    {
+      "testBearer": []
+    }
+  ],
+  "paths": {
+    "/v1/booking-requests": {
+      "post": {
+        "operationId": "acceptBooking",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable acceptance, not proof of HOLD",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID / JSON / business fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required before argument processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Other owner's resource is indistinguishable from absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Window/idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Dual entry limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary failure. CLOSE_RESULT_UNKNOWN is not definite cancellation failure; query/retry same order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/booking-requests/{id}": {
+      "get": {
+        "operationId": "queryBooking",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Own application with current order lifecycle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID / JSON / business fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required before argument processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Other owner's resource is indistinguishable from absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary failure. CLOSE_RESULT_UNKNOWN is not definite cancellation failure; query/retry same order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders/{id}": {
+      "get": {
+        "operationId": "queryOrder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Own persistent order; no expiry side effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID / JSON / business fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required before argument processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Other owner's resource is indistinguishable from absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary failure. CLOSE_RESULT_UNKNOWN is not definite cancellation failure; query/retry same order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders/{id}/cancel": {
+      "post": {
+        "operationId": "cancelOrder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "description": "Strict {}. Closed order terminal/time/reason immutable; payment links may progress. PAID cannot cancel.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyCancel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Closed order or same previous closure; returned stock and released quota atomically",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid ID / JSON / business fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required before argument processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Other owner's resource is indistinguishable from absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PAID_CANCEL_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporary failure. CLOSE_RESULT_UNKNOWN is not definite cancellation failure; query/retry same order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders/{id}/payment-attempts": {
+      "post": {
+        "operationId": "acceptPayment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyCancel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable acceptance only, NOT paid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/payment-attempts/{id}": {
+      "get": {
+        "operationId": "queryPayment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Own authoritative result and separate settlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Strict input/identity/ownership/conflict/unknown commit. PAYMENT_ACCEPTANCE_UNKNOWN: retry original key or query original ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/sim/payment-failures": {
+      "get": {
+        "operationId": "listPaymentFailures",
+        "security": [
+          {
+            "simOperatorBearer": []
+          }
+        ],
+        "x-implementation-status": "pending-BIZ-04",
+        "description": "Management authorization before business reads/writes; current server-run manifest only.",
+        "responses": {
+          "200": {
+            "description": "Current manifest REVIEW/DEAD only; ascending attemptId cursor; empty final page cursor null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailurePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT: strict parameters/body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED: before business reads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SIM_MANAGEMENT_FORBIDDEN: trusted role/capability/environment/switch guard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND: absent or outside current server manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DEPENDENCY_UNAVAILABLE or OPERATION_ACCEPTANCE_UNKNOWN; retry original key; do not assume accepted/failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "afterAttemptId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Generation",
+              "default": "0"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ]
+      }
+    },
+    "/v1/internal/sim/payment-attempts/{attemptId}/recover": {
+      "post": {
+        "operationId": "recoverPayment",
+        "security": [
+          {
+            "simOperatorBearer": []
+          }
+        ],
+        "x-implementation-status": "pending-BIZ-04",
+        "description": "Management authorization before business reads/writes; current server-run manifest only.",
+        "responses": {
+          "200": {
+            "description": "Same operation now completed; DONE redelivery preserves original settlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationReceipt"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Durably accepted; NOT payment success. Existing operation still pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT: strict parameters/body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED: before business reads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SIM_MANAGEMENT_FORBIDDEN: trusted role/capability/environment/switch guard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND: absent or outside current server manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT Error, or durable business REJECTED receipt. DEAD redelivery cannot recover; recover cannot reset a settled attempt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OperationReceipt"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DEPENDENCY_UNAVAILABLE or OPERATION_ACCEPTANCE_UNKNOWN; retry original key; do not assume accepted/failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "attemptId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/sim/payment-results/{resultId}/redeliver": {
+      "post": {
+        "operationId": "redeliverPaymentResult",
+        "security": [
+          {
+            "simOperatorBearer": []
+          }
+        ],
+        "x-implementation-status": "pending-BIZ-04",
+        "description": "Management authorization before business reads/writes; current server-run manifest only.",
+        "responses": {
+          "200": {
+            "description": "Same operation now completed; DONE redelivery preserves original settlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationReceipt"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Durably accepted; NOT payment success. Existing operation still pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT: strict parameters/body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED: before business reads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SIM_MANAGEMENT_FORBIDDEN: trusted role/capability/environment/switch guard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND: absent or outside current server manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT Error, or durable business REJECTED receipt. DEAD redelivery cannot recover; recover cannot reset a settled attempt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OperationReceipt"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DEPENDENCY_UNAVAILABLE or OPERATION_ACCEPTANCE_UNKNOWN; retry original key; do not assume accepted/failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "resultId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SimUuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{8,64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeliveryInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/sim/operations/{operationId}": {
+      "get": {
+        "operationId": "querySimulationOperation",
+        "security": [
+          {
+            "simOperatorBearer": []
+          }
+        ],
+        "x-implementation-status": "pending-BIZ-04",
+        "description": "Management authorization before business reads/writes; current server-run manifest only.",
+        "responses": {
+          "200": {
+            "description": "Durable receipt linked to current server manifest; does not create a recovery round",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_ARGUMENT: strict parameters/body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHENTICATED: before business reads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SIM_MANAGEMENT_FORBIDDEN: trusted role/capability/environment/switch guard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESOURCE_NOT_FOUND: absent or outside current server manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DEPENDENCY_UNAVAILABLE or OPERATION_ACCEPTANCE_UNKNOWN; retry original key; do not assume accepted/failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SimUuid"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "testBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Private random token mapping only in test classpath and biz01-it; not production authentication"
+      },
+      "simOperatorBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Private trusted test adapter identity; requires ADMIN and SIM_TEST_OPERATOR, biz01-it, verified test classpath, explicit biz.sim.management.enabled=true, server-side current-run manifest. Header role/userId is never authoritative."
+      }
+    },
+    "schemas": {
+      "Id": {
+        "type": "string",
+        "pattern": "^[1-9][0-9]{0,18}$",
+        "description": "Positive signed BIGINT decimal string; <=9223372036854775807"
+      },
+      "UtcMillis": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+      },
+      "EmptyCancel": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "BookingInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "tierId",
+          "quantity"
+        ],
+        "properties": {
+          "sessionId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "tierId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "quantity": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          }
+        }
+      },
+      "Accepted": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "statusUrl",
+          "acceptedAt",
+          "processDeadline"
+        ],
+        "properties": {
+          "requestId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "statusUrl": {
+            "type": "string",
+            "pattern": "^/v1/booking-requests/[1-9][0-9]*$"
+          },
+          "acceptedAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "processDeadline": {
+            "$ref": "#/components/schemas/UtcMillis"
+          }
+        }
+      },
+      "EmbeddedOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "orderStatus",
+          "unitPriceCent",
+          "quantity",
+          "payableCent",
+          "currency",
+          "holdCreatedAt",
+          "payExpiresAt",
+          "closedAt",
+          "closeReason",
+          "currentAttemptId",
+          "paidAttemptId",
+          "paidAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "orderStatus": {
+            "type": "string",
+            "enum": [
+              "HOLD",
+              "CANCELLED",
+              "EXPIRED",
+              "PAID"
+            ]
+          },
+          "unitPriceCent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "quantity": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "payableCent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY"
+            ]
+          },
+          "holdCreatedAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "payExpiresAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closeReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "USER_CANCELLED",
+              "PAYMENT_DEADLINE_EXCEEDED"
+            ]
+          },
+          "currentAttemptId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paidAttemptId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paidAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "orderId",
+          "orderStatus",
+          "unitPriceCent",
+          "quantity",
+          "payableCent",
+          "currency",
+          "holdCreatedAt",
+          "payExpiresAt",
+          "closedAt",
+          "closeReason",
+          "requestId",
+          "sessionId",
+          "tierId",
+          "currentAttemptId",
+          "paidAttemptId",
+          "paidAt"
+        ],
+        "properties": {
+          "orderId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "orderStatus": {
+            "type": "string",
+            "enum": [
+              "HOLD",
+              "CANCELLED",
+              "EXPIRED",
+              "PAID"
+            ]
+          },
+          "unitPriceCent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "quantity": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "payableCent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY"
+            ]
+          },
+          "holdCreatedAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "payExpiresAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closeReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "USER_CANCELLED",
+              "PAYMENT_DEADLINE_EXCEEDED"
+            ]
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "tierId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "currentAttemptId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paidAttemptId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paidAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "RequestResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requestId",
+          "status",
+          "reasonCode",
+          "acceptedAt",
+          "processDeadline",
+          "serverTime",
+          "order"
+        ],
+        "properties": {
+          "requestId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACCEPTED",
+              "SUCCEEDED",
+              "REJECTED",
+              "EXPIRED",
+              "PROCESSING_FAILED"
+            ]
+          },
+          "reasonCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "acceptedAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "processDeadline": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "serverTime": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmbeddedOrder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "traceId"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "traceId": {
+            "type": "string"
+          }
+        }
+      },
+      "PaymentAccepted": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attemptId",
+          "orderId",
+          "statusUrl",
+          "simulated",
+          "message"
+        ],
+        "properties": {
+          "attemptId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "orderId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "statusUrl": {
+            "type": "string",
+            "pattern": "^/v1/payment-attempts/[1-9][0-9]*$"
+          },
+          "simulated": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string",
+            "enum": [
+              "模拟支付，无真实资金"
+            ]
+          }
+        }
+      },
+      "PaymentResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attemptId",
+          "orderId",
+          "statusUrl",
+          "simulated",
+          "message",
+          "resultStatus",
+          "settlementStatus",
+          "amountCent",
+          "currency",
+          "orderStatus",
+          "resultId",
+          "resultReason",
+          "reviewReason",
+          "compensationId",
+          "compensationCent",
+          "createdAt",
+          "resolutionDeadline",
+          "resultAt",
+          "settledAt",
+          "compensationAt",
+          "paidAt",
+          "currentAttemptId",
+          "paidAttemptId"
+        ],
+        "properties": {
+          "attemptId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "orderId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "statusUrl": {
+            "type": "string",
+            "pattern": "^/v1/payment-attempts/[1-9][0-9]*$"
+          },
+          "simulated": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string",
+            "enum": [
+              "模拟支付，无真实资金"
+            ]
+          },
+          "resultStatus": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "SUCCESS",
+              "FAILED"
+            ]
+          },
+          "settlementStatus": {
+            "type": "string",
+            "enum": [
+              "UNRESOLVED",
+              "APPLIED",
+              "NO_CHARGE",
+              "REVERSED",
+              "REVIEW"
+            ]
+          },
+          "amountCent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "CNY"
+            ]
+          },
+          "orderStatus": {
+            "type": "string",
+            "enum": [
+              "HOLD",
+              "CANCELLED",
+              "EXPIRED",
+              "PAID"
+            ]
+          },
+          "resultId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resultReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "compensationId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "compensationCent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "resolutionDeadline": {
+            "$ref": "#/components/schemas/UtcMillis"
+          },
+          "resultAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settledAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "compensationAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paidAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currentAttemptId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "paidAttemptId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SimUuid": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      },
+      "Generation": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]{0,18})$",
+        "description": "Nonnegative signed BIGINT decimal string; <=9223372036854775807"
+      },
+      "RecoveryInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Trim before binding; reject blank/control characters"
+          }
+        }
+      },
+      "RedeliveryInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason",
+          "deliveries"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Trim before binding; reject blank/control characters"
+          },
+          "deliveries": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          }
+        }
+      },
+      "OperationReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operationId",
+          "statusUrl",
+          "operatorId",
+          "action",
+          "attemptId",
+          "targetId",
+          "reason",
+          "deliveries",
+          "beforeSettlement",
+          "beforeEvent",
+          "beforeAttempts",
+          "beforeError",
+          "generation",
+          "status",
+          "acceptedAt",
+          "completedAt",
+          "result",
+          "rejectionReason",
+          "simulated"
+        ],
+        "properties": {
+          "operationId": {
+            "$ref": "#/components/schemas/SimUuid"
+          },
+          "statusUrl": {
+            "type": "string",
+            "pattern": "^/v1/internal/sim/operations/[0-9a-f-]{36}$"
+          },
+          "operatorId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "RECOVER",
+              "REDELIVER"
+            ]
+          },
+          "attemptId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "deliveries": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "beforeSettlement": {
+            "type": "string",
+            "enum": [
+              "UNRESOLVED",
+              "REVIEW",
+              "APPLIED",
+              "NO_CHARGE",
+              "REVERSED"
+            ]
+          },
+          "beforeEvent": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "DEAD",
+              "DONE",
+              "MISSING"
+            ]
+          },
+          "beforeAttempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "beforeError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACCEPTED",
+              "COMPLETED",
+              "REJECTED"
+            ]
+          },
+          "acceptedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcMillis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "APPLIED",
+                  "NO_CHARGE",
+                  "REVERSED",
+                  "REVIEW"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rejectionReason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "NOT_RECOVERABLE",
+                  "RECOVERY_REQUIRED",
+                  "TRUSTED_RESULT_INCONSISTENT"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "simulated": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "PaymentFailure": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attemptId",
+          "resultId",
+          "orderId",
+          "resultStatus",
+          "settlementStatus",
+          "eventState",
+          "attempts",
+          "generation",
+          "reviewReason",
+          "lastError"
+        ],
+        "properties": {
+          "attemptId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "resultId": {
+            "$ref": "#/components/schemas/SimUuid"
+          },
+          "orderId": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "resultStatus": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "FAILED"
+            ]
+          },
+          "settlementStatus": {
+            "type": "string",
+            "enum": [
+              "REVIEW"
+            ]
+          },
+          "eventState": {
+            "type": "string",
+            "enum": [
+              "DEAD"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6
+          },
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "reviewReason": {
+            "type": "string"
+          },
+          "lastError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "FailurePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextAfterAttemptId"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/PaymentFailure"
+            }
+          },
+          "nextAfterAttemptId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Id"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

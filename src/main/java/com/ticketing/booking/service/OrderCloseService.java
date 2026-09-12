@@ -75,17 +75,19 @@ public class OrderCloseService {
     /** Acquires the common business prefix only; caller takes attempt/event locks next, then reads time. */
     public LockedOrder lockOrder(long orderId, Long actor) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) { throw new IllegalStateException("ORDER_LOCK_REQUIRES_TX"); }
-        var route = store.required("SELECT request_id,user_id,session_id,tier_id FROM booking_order WHERE id=?", orderId);
+        var route = store.required("SELECT * FROM booking_order WHERE id=?", orderId);
         long user = number(route, "user_id"), session = number(route, "session_id"), tier = number(route, "tier_id");
-        long requestId = number(route, "request_id");
         store.required("SELECT id FROM event_session WHERE id=? FOR SHARE", session);
         runtime.at("CLOSE_SESSION_LOCKED", orderId);
         var inventory = store.required("SELECT * FROM ticket_tier WHERE id=? AND session_id=? FOR UPDATE", tier, session);
         var quota = store.optional("SELECT * FROM user_session_quota WHERE user_id=? AND session_id=? FOR UPDATE", user, session);
-        var request = store.required("SELECT * FROM booking_request WHERE id=? FOR UPDATE", requestId);
+        var request = route.get("request_id") != null
+            ? store.required("SELECT * FROM booking_request WHERE id=? FOR UPDATE", number(route,"request_id"))
+            : store.required("SELECT * FROM waitlist_entry WHERE id=? FOR UPDATE", number(route,"waitlist_entry_id"));
         var order = store.required("SELECT * FROM booking_order WHERE id=? FOR UPDATE", orderId);
         if (number(order, "user_id") != user || number(order, "session_id") != session
-                || number(order, "tier_id") != tier || number(order, "request_id") != requestId) {
+                || number(order, "tier_id") != tier || !java.util.Objects.equals(order.get("request_id"),route.get("request_id"))
+                || !java.util.Objects.equals(order.get("waitlist_entry_id"),route.get("waitlist_entry_id"))) {
             throw new IllegalStateException("CLOSE_IMMUTABLE_ROUTE_CHANGED");
         }
         if (actor != null && actor != user) { throw new ApiFailure(404, "RESOURCE_NOT_FOUND"); }
@@ -106,7 +108,7 @@ public class OrderCloseService {
         if (!"HOLD".equals(state)) { throw new IllegalStateException("CLOSE_UNSUPPORTED_STATE"); }
         Instant deadline = instant(order.get("pay_expires_at"));
         if (!cancelRequested && now.isBefore(deadline)) { return view(order); }
-        if (!"SUCCEEDED".equals(request.get("status")) || number(request, "order_id") != orderId
+        if (!validSource(locked)
                 || quota == null || !"ORDER".equals(quota.get("owner_type")) || number(quota, "owner_id") != orderId) {
             throw new IllegalStateException("CLOSE_OWNER_OR_REQUEST_INCONSISTENT");
         }
@@ -138,7 +140,10 @@ public class OrderCloseService {
     private static Map<String, Object> view(Map<String, Object> row) {
         Map<String, Object> result = new LinkedHashMap<>();
         for (var field : Map.of("orderId", "id", "requestId", "request_id", "sessionId", "session_id", "tierId", "tier_id").entrySet()) {
-            result.put(field.getKey(), Long.toString(number(row, field.getValue())));
+            result.put(field.getKey(), row.get(field.getValue()) == null ? null : Long.toString(number(row, field.getValue())));
+        }
+        if (row.containsKey("waitlist_entry_id")) {
+            result.put("waitlistId",row.get("waitlist_entry_id")==null?null:Long.toString(number(row,"waitlist_entry_id")));
         }
         result.put("orderStatus", row.get("status"));
         result.put("unitPriceCent", row.get("unit_price_cent"));
@@ -157,5 +162,13 @@ public class OrderCloseService {
         result.put("currentAttemptId",row.get("current_attempt_id")==null?null:Long.toString(number(row,"current_attempt_id")));
         result.put("paidAttemptId",row.get("paid_attempt_id")==null?null:Long.toString(number(row,"paid_attempt_id")));
         result.put("paidAt",row.get("paid_at")==null?null:time(row.get("paid_at")));
+    }
+
+    public static boolean validSource(LockedOrder locked) {
+        var source=locked.request(); var order=locked.order();
+        String expected=order.get("request_id")==null?"ALLOCATED":"SUCCEEDED";
+        return source!=null && expected.equals(source.get("status")) && source.get("order_id")!=null
+            && number(source,"order_id")==number(order,"id") && number(source,"user_id")==number(order,"user_id")
+            && number(source,"session_id")==number(order,"session_id") && number(source,"tier_id")==number(order,"tier_id");
     }
 }

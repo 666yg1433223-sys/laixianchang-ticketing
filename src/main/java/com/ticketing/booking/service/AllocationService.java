@@ -21,7 +21,7 @@ public class AllocationService {
     public volatile String lastFailureType = "";
     private record Locked(Map<String,Object> session,Map<String,Object> tier,Map<String,Object> quota,
             Map<String,Object> request,Map<String,Object> order,Map<String,Object> event) { }
-    private record Generation(int attempts,Instant due) { }
+    private record Generation(int attempts,Instant due,long round) { }
 
     public AllocationService(BookingStore store,RuntimeServices runtime,PlatformTransactionManager manager,com.ticketing.booking.config.Diagnostics diagnostics) {
         this.store=store; this.runtime=runtime;
@@ -36,7 +36,7 @@ public class AllocationService {
             tx.executeWithoutResult(status -> {
                 Locked lock=lock(id);
                 if (terminal(lock)) { return; }
-                generation[0]=new Generation((int)number(lock.event(),"attempts"),instant(lock.event().get("next_attempt_at")));
+                generation[0]=new Generation((int)number(lock.event(),"attempts"),instant(lock.event().get("next_attempt_at")),number(lock.event(),"recovery_generation"));
                 runtime.at("T2_LOCKS_ACQUIRED",id);
                 Instant now=runtime.afterLocks(store.jdbc());
                 if (!now.isBefore(instant(lock.request().get("process_deadline")))) {
@@ -51,6 +51,9 @@ public class AllocationService {
                     finish(lock,"REJECTED","QUOTA_ALREADY_HELD",null,now,"DONE"); return;
                 }
                 long tier=number(lock.tier(),"id");
+                if (runtime.productEnabled() && store.jdbc().queryForObject("SELECT COUNT(*) FROM waitlist_entry WHERE tier_id=? AND status='WAITING'",Long.class,tier)>0) {
+                    finish(lock,"REJECTED","WAITLIST_REQUIRED",null,now,"DONE"); return;
+                }
                 int changed=store.jdbc().update("UPDATE ticket_tier SET available=available-1 WHERE id=? AND available>0",tier);
                 if (changed==0) { finish(lock,"REJECTED","NO_TICKETS",null,now,"DONE"); return; }
                 one(changed);
@@ -96,7 +99,7 @@ public class AllocationService {
         String state=(String)lock.request().get("status");
         String event=(String)lock.event().get("state");
         if ("ACCEPTED".equals(state)) {
-            if (!"READY".equals(event) || lock.order()!=null) { throw new IllegalStateException("INCONSISTENT_ACCEPTED"); }
+            if (!("READY".equals(event) || (runtime.productEnabled() && "PUBLISHED".equals(event))) || lock.order()!=null) { throw new IllegalStateException("INCONSISTENT_ACCEPTED"); }
             return false;
         }
         if ("SUCCEEDED".equals(state)) {
@@ -109,7 +112,7 @@ public class AllocationService {
     private void finish(Locked lock,String status,String reason,Long order,Instant now,String eventState) {
         one(store.jdbc().update("UPDATE booking_request SET status=?,reason_code=?,order_id=?,finished_at=? WHERE id=? AND status='ACCEPTED'",
             status,reason,order,sqlTime(now),number(lock.request(),"id")));
-        one(store.jdbc().update("UPDATE outbox_event SET state=?,next_attempt_at=NULL,finished_at=? WHERE id=? AND state='READY'",
+        one(store.jdbc().update("UPDATE outbox_event SET state=?,next_attempt_at=NULL,finished_at=? WHERE id=? AND state IN ('READY','PUBLISHED')",
             eventState,sqlTime(now),number(lock.event(),"id")));
     }
     private void recordFailure(long id,Generation original) {
@@ -121,14 +124,14 @@ public class AllocationService {
                 Instant deadline=instant(lock.request().get("process_deadline"));
                 if (!now.isBefore(deadline)) { finish(lock,"EXPIRED","PROCESS_DEADLINE_EXCEEDED",null,now,"DONE"); return; }
                 int attempts=(int)number(lock.event(),"attempts");
-                if (attempts!=original.attempts() || !original.due().equals(instant(lock.event().get("next_attempt_at")))) { return; }
+                if (attempts!=original.attempts() || original.round()!=number(lock.event(),"recovery_generation") || !original.due().equals(instant(lock.event().get("next_attempt_at")))) { return; }
                 int failures=attempts+1;
-                one(store.jdbc().update("UPDATE outbox_event SET attempts=?,last_error_code='T2_TECHNICAL_FAILURE' WHERE id=? AND attempts=? AND state='READY'",
+                one(store.jdbc().update("UPDATE outbox_event SET attempts=?,last_error_code='T2_TECHNICAL_FAILURE' WHERE id=? AND attempts=? AND state IN ('READY','PUBLISHED')",
                     failures,number(lock.event(),"id"),attempts));
                 if (failures>=6) { finish(lock,"PROCESSING_FAILED","RETRY_EXHAUSTED",null,now,"DEAD"); return; }
                 long base=1000L << (failures-1);
                 Instant next=earlier(now.plusMillis(base+ThreadLocalRandom.current().nextLong(base/5+1)),deadline);
-                one(store.jdbc().update("UPDATE outbox_event SET next_attempt_at=? WHERE id=? AND state='READY'",sqlTime(next),number(lock.event(),"id")));
+                one(store.jdbc().update("UPDATE outbox_event SET next_attempt_at=? WHERE id=? AND state IN ('READY','PUBLISHED')",sqlTime(next),number(lock.event(),"id")));
             });
         } catch (RuntimeException unavailable) {
             diagnostics.record(unavailable);

@@ -13,7 +13,7 @@ import org.springframework.core.env.Environment;
 
 public final class Bootstrap {
     public static final Path ROOT = Path.of("D:/Codex/ticketing");
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
 
     public record Ready(HikariDataSource dataSource, RuntimeServices runtime, String runId) implements AutoCloseable {
         @Override public void close() { dataSource.close(); }
@@ -22,6 +22,9 @@ public final class Bootstrap {
     private Bootstrap() { }
 
     public static Ready prepare(Environment env) {
+        if (Arrays.equals(env.getActiveProfiles(), new String[]{"local-sim"})) {
+            return LocalBootstrap.prepare(env);
+        }
         require(Arrays.equals(env.getActiveProfiles(), new String[]{"biz01-it"}), "profile");
         for (var item : Map.of("server.address","127.0.0.1","server.port","18083",
                 "biz.db.name","ticketing_biz01_it","biz.db.user","ticketing_biz01_it_app",
@@ -49,7 +52,7 @@ public final class Bootstrap {
                 reservation.bind(new java.net.InetSocketAddress("127.0.0.1",18083));
             }
             int applied;
-            Path evidence = ROOT.resolve("evidence/BIZ-03-I-001").resolve(runId);
+            Path evidence = evidenceDirectory(runId);
             Files.createDirectories(evidence);
             try (HikariDataSource migration = pool("ticketing_biz01_it_migrator",
                     credentials.path("itMigrator").asText(), credentials.path("trustPassword").asText(), 1)) {
@@ -58,9 +61,28 @@ public final class Bootstrap {
                     .baselineOnMigrate(false).validateMigrationNaming(true).validateOnMigrate(true).load();
                 var before = flyway.validateWithResult();
                 JSON.writeValue(evidence.resolve("pre-migration-validation-" + System.nanoTime() + ".json").toFile(),before);
+                boolean upgradingV4=Arrays.stream(flyway.info().pending()).anyMatch(info->"4".equals(info.getVersion().getVersion()))
+                    && Arrays.stream(flyway.info().applied()).anyMatch(info->"3".equals(info.getVersion().getVersion()));
+                Map<String,java.util.List<Map<String,Object>>> oldFacts=null;
+                if(upgradingV4) {
+                    try(var probe=pool("ticketing_biz01_it_app",credentials.path("itApp").asText(),credentials.path("trustPassword").asText(),1)) {
+                        oldFacts=snapshotExistingFacts(new org.springframework.jdbc.core.JdbcTemplate(probe));
+                        JSON.writeValue(evidence.resolve("before-v4-"+System.nanoTime()+".json").toFile(),oldFacts);
+                    }
+                }
                 // migrate validates applied history while permitting the pending V1 on an empty schema.
                 applied = flyway.migrate().migrationsExecuted;
                 flyway.validate();
+                if(oldFacts!=null) {
+                    try(var probe=pool("ticketing_biz01_it_app",credentials.path("itApp").asText(),credentials.path("trustPassword").asText(),1)) {
+                        var jdbc=new org.springframework.jdbc.core.JdbcTemplate(probe);
+                        var after=snapshotExistingFacts(jdbc);
+                        assertExistingFacts(oldFacts,after);
+                        require(jdbc.queryForObject("SELECT COUNT(*) FROM outbox_event WHERE recovery_generation<>0",Long.class)==0,"V4 default round");
+                        require(jdbc.queryForObject("SELECT COUNT(*) FROM sim_payment_operation",Long.class)==0,"V4 empty audit");
+                        JSON.writeValue(evidence.resolve("after-v4-"+System.nanoTime()+".json").toFile(),Map.of("oldRowsPreserved",true,"facts",after));
+                    }
+                }
             }
             Path result = evidence.resolve("migration-" + System.nanoTime() + ".json");
             JSON.writeValue(result.toFile(), Map.of("at", Instant.now().toString(), "database","ticketing_biz01_it",
@@ -70,6 +92,42 @@ public final class Bootstrap {
         } catch (Exception failure) {
             // Never put credential-bearing configuration or JDBC driver messages into an API/log.
             throw new IllegalStateException("BIZ01_STARTUP_REFUSED:" + failure.getClass().getSimpleName());
+        }
+    }
+
+    public static Path evidenceDirectory(String runId) {
+        require(runId.matches("[a-z0-9-]{8,50}"), "evidence runId");
+        String task=System.getProperty("biz.evidenceTask","BIZ-03-I-001");
+        require(java.util.Set.of("BIZ-03-I-001","BIZ-04-I-001").contains(task),"evidence task");
+        return ROOT.resolve("evidence").resolve(task).resolve(runId);
+    }
+
+    private static final Map<String,String> SNAPSHOT_TABLES=Map.ofEntries(
+        Map.entry("app_user","id"),Map.entry("event","id"),Map.entry("event_session","id"),
+        Map.entry("ticket_tier","id"),Map.entry("booking_request","id"),Map.entry("booking_order","id"),
+        Map.entry("user_session_quota","user_id,session_id"),Map.entry("inventory_ledger","id"),
+        Map.entry("payment_attempt","id"),Map.entry("outbox_event","id"),Map.entry("flyway_schema_history","installed_rank"));
+
+    private static Map<String,java.util.List<Map<String,Object>>> snapshotExistingFacts(org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        jdbc.setQueryTimeout(5);
+        var snapshot=new java.util.TreeMap<String,java.util.List<Map<String,Object>>>();
+        for(var table:SNAPSHOT_TABLES.entrySet()) {
+            snapshot.put(table.getKey(),jdbc.queryForList("SELECT * FROM "+table.getKey()+" ORDER BY "+table.getValue()));
+        }
+        return snapshot;
+    }
+
+    private static void assertExistingFacts(Map<String,java.util.List<Map<String,Object>>> before,
+            Map<String,java.util.List<Map<String,Object>>> after) {
+        for(var table:before.entrySet()) {
+            var oldRows=table.getValue();var newRows=after.get(table.getKey());
+            boolean history=table.getKey().equals("flyway_schema_history");
+            require(history?newRows.size()==oldRows.size()+1:newRows.size()==oldRows.size(),"V4 old row count");
+            for(int i=0;i<oldRows.size();i++) {
+                for(var column:oldRows.get(i).entrySet()) {
+                    require(JSON.valueToTree(column.getValue()).equals(JSON.valueToTree(newRows.get(i).get(column.getKey()))),"V4 old value");
+                }
+            }
         }
     }
 

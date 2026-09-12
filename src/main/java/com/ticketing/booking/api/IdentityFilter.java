@@ -2,6 +2,7 @@ package com.ticketing.booking.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ticketing.booking.config.RuntimeServices;
+import com.ticketing.booking.domain.ApiFailure;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,14 +19,36 @@ public class IdentityFilter extends OncePerRequestFilter {
     public IdentityFilter(RuntimeServices runtime) { this.runtime=runtime; }
     @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain)
             throws ServletException,IOException {
-        if (request.getRequestURI().startsWith("/v1/booking-requests") || request.getRequestURI().startsWith("/v1/orders") || request.getRequestURI().startsWith("/v1/payment-attempts")) {
-            try { request.setAttribute("booking.principal",runtime.authenticate(request.getHeader("Authorization"))); }
+        String path = request.getRequestURI();
+        if (path.startsWith("/v1/booking-requests") || path.startsWith("/v1/orders")
+                || path.startsWith("/v1/payment-attempts") || path.startsWith("/v1/waitlist")
+                || path.startsWith("/v1/admin") || path.equals("/v1/auth/me") || path.equals("/v1/auth/logout")) {
+            try {
+                long principal = runtime.authenticate(request.getHeader("Authorization"));
+                if (principal <= 0) { throw new ApiFailure(401, "UNAUTHENTICATED"); }
+                request.setAttribute("booking.principal", principal);
+            }
+            catch (ApiFailure failure) {
+                reject(response, failure.status(), failure.code(), failure.retryAfter());
+                return;
+            }
             catch (IllegalArgumentException denied) {
-                response.setStatus(401); response.setContentType("application/json");
-                new ObjectMapper().writeValue(response.getOutputStream(),Map.of("code","UNAUTHENTICATED","message","需要有效身份","traceId",UUID.randomUUID().toString()));
+                reject(response, 401, "UNAUTHENTICATED", 0);
+                return;
+            }
+            catch (RuntimeException dependency) {
+                reject(response, 503, "DEPENDENCY_UNAVAILABLE", 0);
                 return;
             }
         }
         chain.doFilter(request,response);
+    }
+
+    private static void reject(HttpServletResponse response, int status, String code, int retryAfter) throws IOException {
+        response.setStatus(status); response.setContentType("application/json");
+        response.setCharacterEncoding("UTF-8");
+        if (retryAfter > 0) { response.setHeader("Retry-After", Integer.toString(retryAfter)); }
+        new ObjectMapper().writeValue(response.getOutputStream(), Map.of("code", code, "message", code,
+            "traceId", UUID.randomUUID().toString()));
     }
 }

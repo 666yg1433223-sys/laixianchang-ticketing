@@ -25,7 +25,7 @@ public class OrderExpiryScanner {
     }
 
     @Scheduled(fixedDelay = 1000, initialDelay = 1000)
-    public void scheduled() { if (runtime.recoveryEnabled()) { scanOnce(); } }
+    public void scheduled() { if (runtime.settlementRecoveryEnabled()) { scanOnce(); } }
 
     public void scanOnce() {
         try {

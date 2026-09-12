@@ -22,7 +22,7 @@ class MigrationTest {
     }
     @Test void migrationAndLeastPrivilege() throws Exception {
         var json = new ObjectMapper().findAndRegisterModules();
-        var evidence = Bootstrap.ROOT.resolve("evidence/BIZ-03-I-001").resolve(environment().getProperty("biz.runId"));
+        var evidence = Bootstrap.evidenceDirectory(environment().getProperty("biz.runId"));
         Files.createDirectories(evidence);
         var secrets = json.readTree(Files.readString(Bootstrap.ROOT.resolve(".local/credentials.json")));
         java.util.Map<String,Object> before = new java.util.LinkedHashMap<>();
@@ -39,10 +39,11 @@ class MigrationTest {
         try (var first = Bootstrap.prepare(environment())) {
             JdbcTemplate jdbc = new JdbcTemplate(first.dataSource());
             assertEquals("ticketing_biz01_it",jdbc.queryForObject("SELECT DATABASE()",String.class));
-            assertEquals(11,jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class));
+            assertEquals(12,jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()",Integer.class));
             assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version='1'",Integer.class));
             assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version='2'",Integer.class));
             assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version='3'",Integer.class));
+            assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version='4'",Integer.class));
             assertEquals(-576261309,jdbc.queryForObject("SELECT checksum FROM flyway_schema_history WHERE version='1'",Integer.class));
             for (String table : java.util.List.of("app_user", "event", "event_session", "ticket_tier")) {
                 assertEquals(before.get(table),jdbc.queryForList("SELECT * FROM " + table + " ORDER BY id"));

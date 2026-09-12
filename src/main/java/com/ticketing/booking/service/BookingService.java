@@ -41,6 +41,9 @@ public class BookingService {
         runtime.at("AFTER_IDEMPOTENCY_MISS",0);
         Map<String,Object> accepted;
         try {
+            if(runtime.productEnabled() && store.jdbc().queryForObject("SELECT COUNT(*) FROM booking_request WHERE status='ACCEPTED'",Long.class)>=1000) {
+                throw new ApiFailure(503,"BOOKING_BACKLOG_BUSY",3);
+            }
             var catalogue = store.optional("SELECT s.* FROM event_session s JOIN ticket_tier t ON t.session_id=s.id WHERE s.id=? AND t.id=?",session,tier);
             if (catalogue == null) { throw new ApiFailure(404,"RESOURCE_NOT_FOUND"); }
             Instant now = runtime.afterLocks(store.jdbc());

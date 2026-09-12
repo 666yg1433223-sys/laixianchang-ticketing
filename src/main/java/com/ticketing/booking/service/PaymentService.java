@@ -94,7 +94,7 @@ public class PaymentService {
         for(var field:Map.of("createdAt","created_at","resolutionDeadline","resolution_deadline","resultAt","result_at","settledAt","settled_at","compensationAt","compensation_at").entrySet()) v.put(field.getKey(),a.get(field.getValue())==null?null:time(a.get(field.getValue())));
         OrderCloseService.paymentLinks(a,v);return v;
     }
-    private OrderCloseService.LockedOrder lockRoute(long attempt) {
+    OrderCloseService.LockedOrder lockRoute(long attempt) {
         var route=store.required("SELECT order_id FROM payment_attempt WHERE id=?",attempt);
         return close.lockOrder(number(route,"order_id"),null);
     }
@@ -120,36 +120,39 @@ public class PaymentService {
         });
         runtime.at("P1_COMMITTED",id);
     }
-    private record Generation(int attempts,Instant due) { }
+    record Generation(long round,int attempts,Instant due) {
+        boolean matches(Map<String,Object> event) {
+            return "READY".equals(event.get("state"))
+                && number(event,"recovery_generation")==round
+                && number(event,"attempts")==attempts
+                && event.get("next_attempt_at")!=null
+                && instant(event.get("next_attempt_at")).equals(due);
+        }
+    }
     public void settle(long id) {
         final Generation[] generation={null};
         try {
             // Observe a generation without locks so even a later lock-timeout can be counted safely.
-            var observed=store.optional("SELECT attempts,next_attempt_at FROM outbox_event WHERE payment_attempt_id=? AND event_type='PAYMENT_RESULT_RECORDED' AND state='READY'",id);
-            if(observed!=null) { generation[0]=new Generation((int)number(observed,"attempts"),instant(observed.get("next_attempt_at"))); }
+            var observed=store.optional("SELECT recovery_generation,attempts,next_attempt_at FROM outbox_event WHERE payment_attempt_id=? AND event_type='PAYMENT_RESULT_RECORDED' AND state='READY'",id);
+            if(observed==null) { return; }
+            generation[0]=new Generation(number(observed,"recovery_generation"),(int)number(observed,"attempts"),instant(observed.get("next_attempt_at")));
+            runtime.at("P2_OBSERVED",id);
             tx.executeWithoutResult(status->{
                 var locked=lockRoute(id);var o=locked.order();
                 var a=store.required("SELECT * FROM payment_attempt WHERE id=? FOR UPDATE",id);
                 var e=store.optional("SELECT * FROM outbox_event WHERE event_type='PAYMENT_RESULT_RECORDED' AND aggregate_id=? FOR UPDATE",id);
                 if(e==null) { if(!"PENDING".equals(a.get("result_status"))) { throw new IllegalStateException("PAYMENT_RESULT_EVENT_MISSING"); }return; }
-                if(!"READY".equals(e.get("state"))) { return; }
+                // Never adopt a round created while this execution was waiting for business locks.
+                if(!generation[0].matches(e)) { return; }
+                lockOperations(id,generation[0].round());
                 runtime.at("P2_LOCKS_ACQUIRED",id);
                 Instant now=runtime.afterLocks(store.jdbc());
                 if(now.isBefore(instant(e.get("next_attempt_at")))) { return; }
-                generation[0]=new Generation((int)number(e,"attempts"),instant(e.get("next_attempt_at")));
                 try {
-                    association(a,o);
-                    if(!"SUCCEEDED".equals(locked.request().get("status")) || number(locked.request(),"order_id")!=number(o,"id")) { throw new IllegalStateException("PAYMENT_REQUEST_INCONSISTENT"); }
-                    if(number(e,"payment_attempt_id")!=id || number(e,"aggregate_id")!=id
-                        || !Set.of("SUCCESS","FAILED").contains(a.get("result_status"))
-                        || !MessageDigest.isEqual(digest(a),(byte[])a.get("result_digest"))
-                        || !"UNRESOLVED".equals(a.get("settlement_status"))) { throw new IllegalStateException("PAYMENT_TRUSTED_RESULT_INCONSISTENT"); }
-                    if("HOLD".equals(o.get("status"))) {
-                        if(o.get("current_attempt_id")==null || number(o,"current_attempt_id")!=id) { throw new IllegalStateException("PAYMENT_CURRENT_ATTEMPT_INCONSISTENT"); }
-                        assertActive(locked);
-                    } else if("PAID".equals(o.get("status"))) { throw new IllegalStateException("PAYMENT_UNRESOLVED_FOR_PAID_ORDER"); }
+                    validateTrusted(locked,a,e,false);
                 } catch(IllegalStateException inconsistent) {
-                    diagnostics.record(inconsistent);review(id,number(e,"id"),now,"TRUSTED_RESULT_INCONSISTENT");return;
+                    diagnostics.record(inconsistent);review(id,number(e,"id"),now,"TRUSTED_RESULT_INCONSISTENT");
+                    completeOperations(id,generation[0].round(),"REVIEW",now);return;
                 }
                 boolean success="SUCCESS".equals(a.get("result_status"));
                 boolean eligible="HOLD".equals(o.get("status")) && now.isBefore(instant(o.get("pay_expires_at")));
@@ -166,6 +169,8 @@ public class PaymentService {
                 }
                 runtime.at("P2_AFTER_SETTLEMENT",id);
                 one(store.jdbc().update("UPDATE outbox_event SET state='DONE',next_attempt_at=NULL,finished_at=?,last_error_code=NULL WHERE id=? AND state='READY'",sqlTime(now),number(e,"id")));
+                String result=success?(eligible?"APPLIED":"REVERSED"):"NO_CHARGE";
+                completeOperations(id,generation[0].round(),result,now);
                 runtime.at("P2_BEFORE_COMMIT",id);
             });
             runtime.at("P2_COMMITTED",id);
@@ -188,17 +193,49 @@ public class PaymentService {
         tx.executeWithoutResult(status->{
             lockRoute(id);var a=store.required("SELECT * FROM payment_attempt WHERE id=? FOR UPDATE",id);
             var e=store.required("SELECT * FROM outbox_event WHERE event_type='PAYMENT_RESULT_RECORDED' AND aggregate_id=? FOR UPDATE",id);
-            if(!"READY".equals(e.get("state")) || !"UNRESOLVED".equals(a.get("settlement_status"))
-                || number(e,"attempts")!=observed.attempts() || !instant(e.get("next_attempt_at")).equals(observed.due())) { return; }
+            if(!observed.matches(e) || !"UNRESOLVED".equals(a.get("settlement_status"))) { return; }
+            lockOperations(id,observed.round());
             Instant now=runtime.afterLocks(store.jdbc());int count=observed.attempts()+1;
             if(now.isBefore(observed.due())) { return; }
             one(store.jdbc().update("UPDATE outbox_event SET attempts=?,last_error_code='PAYMENT_TECHNICAL_FAILURE' WHERE id=?",count,number(e,"id")));
-            if(count>=6) { review(id,number(e,"id"),now,"RETRY_EXHAUSTED"); }
+            if(count>=6) {
+                review(id,number(e,"id"),now,"RETRY_EXHAUSTED");
+                completeOperations(id,observed.round(),"REVIEW",now);
+            }
             else {
                 long delay=(1L<<(count-1))*1000;delay+=ThreadLocalRandom.current().nextLong(delay/5+1);
                 one(store.jdbc().update("UPDATE outbox_event SET next_attempt_at=? WHERE id=? AND state='READY'",sqlTime(now.plusMillis(delay)),number(e,"id")));
             }
         });
+    }
+    void lockOperations(long id,long round) {
+        store.jdbc().queryForList("SELECT operation_id FROM sim_payment_operation WHERE attempt_id=? AND generation=? AND status='ACCEPTED' ORDER BY operation_id FOR UPDATE",id,round);
+    }
+    private void completeOperations(long id,long round,String result,Instant now) {
+        store.jdbc().update("UPDATE sim_payment_operation SET status='COMPLETED',result=?,completed_at=? WHERE attempt_id=? AND generation=? AND status='ACCEPTED'",result,sqlTime(now),id,round);
+        runtime.at("P2_AFTER_AUDIT",id);
+    }
+    /** Shared validation for automatic settlement and the explicitly authorised recovery transaction. */
+    void validateTrusted(OrderCloseService.LockedOrder locked,Map<String,Object> a,Map<String,Object> e,boolean allowReview) {
+        var o=locked.order();long id=number(a,"id");
+        association(a,o);
+        if(!OrderCloseService.validSource(locked)) {
+            throw new IllegalStateException("PAYMENT_REQUEST_INCONSISTENT");
+        }
+        String state=(String)a.get("settlement_status");
+        if(number(e,"payment_attempt_id")!=id || number(e,"aggregate_id")!=id
+            || !Set.of("SUCCESS","FAILED").contains(a.get("result_status"))
+            || !(a.get("result_digest") instanceof byte[] storedDigest)
+            || !MessageDigest.isEqual(digest(a),storedDigest)
+            || !("UNRESOLVED".equals(state) || (allowReview && "REVIEW".equals(state)))) {
+            throw new IllegalStateException("PAYMENT_TRUSTED_RESULT_INCONSISTENT");
+        }
+        if("HOLD".equals(o.get("status"))) {
+            if(o.get("current_attempt_id")==null || number(o,"current_attempt_id")!=id) { throw new IllegalStateException("PAYMENT_CURRENT_ATTEMPT_INCONSISTENT"); }
+            assertActive(locked);
+        } else if(!Set.of("CANCELLED","EXPIRED").contains(o.get("status"))) {
+            throw new IllegalStateException("PAYMENT_UNRESOLVED_ORDER_INCONSISTENT");
+        }
     }
     private static void association(Map<String,Object> a,Map<String,Object> o) {
         if(number(a,"order_id")!=number(o,"id") || number(a,"user_id")!=number(o,"user_id")
@@ -208,7 +245,7 @@ public class PaymentService {
     private void assertActive(OrderCloseService.LockedOrder locked) {
         var o=locked.order();var q=locked.quota();var r=locked.request();long id=number(o,"id");
         if(q==null || !"ORDER".equals(q.get("owner_type")) || number(q,"owner_id")!=id
-            || !"SUCCEEDED".equals(r.get("status")) || number(r,"order_id")!=id) { throw new IllegalStateException("PAYMENT_OWNER_INCONSISTENT"); }
+            || !OrderCloseService.validSource(locked)) { throw new IllegalStateException("PAYMENT_OWNER_INCONSISTENT"); }
         var rows=store.jdbc().queryForList("SELECT action,delta,tier_id FROM inventory_ledger WHERE order_id=?",id);
         if(rows.size()!=1 || !"RESERVE".equals(rows.get(0).get("action")) || number(rows.get(0),"delta")!=-1
             || number(rows.get(0),"tier_id")!=number(o,"tier_id")) { throw new IllegalStateException("PAYMENT_LEDGER_INCONSISTENT"); }

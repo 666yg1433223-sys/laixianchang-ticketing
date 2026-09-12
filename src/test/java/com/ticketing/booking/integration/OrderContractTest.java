@@ -16,24 +16,41 @@ class OrderContractTest {
     final ObjectMapper json = new ObjectMapper();
     JsonNode spec;
     void validate(JsonNode schema, JsonNode value) {
+        assertTrue(schema.isObject(), "Missing or unsupported schema " + schema);
         if (schema.has("$ref")) {
             String target = schema.get("$ref").asText();
             assertTrue(target.startsWith("#/components/schemas/"));
             validate(spec.at(target.substring(1)), value); return;
+        }
+        if (schema.has("oneOf")) {
+            var options = schema.get("oneOf");
+            assertTrue(options.isArray() && !options.isEmpty(), "oneOf must have schema alternatives");
+            int matches = 0;
+            for (var option : options) {
+                try { validate(option, value); matches++; } catch (AssertionError ignored) { }
+            }
+            assertEquals(1, matches, "oneOf requires exactly one matching schema for " + value);
         }
         if (schema.has("anyOf")) {
             int matches = 0;
             for (var option : schema.get("anyOf")) {
                 try { validate(option, value); matches++; } catch (AssertionError ignored) { }
             }
-            assertTrue(matches > 0, "No allowed schema matches " + value); return;
+            assertTrue(matches > 0, "No allowed schema matches " + value);
         }
         var types = new HashSet<String>();
         if (schema.path("type").isArray()) { schema.get("type").forEach(t -> types.add(t.asText())); }
         else { types.add(schema.path("type").asText()); }
         String actual = value.isNull() ? "null" : value.isObject() ? "object" : value.isTextual() ? "string"
-                : value.isIntegralNumber() ? "integer" : value.isBoolean() ? "boolean" : "unsupported";
-        assertTrue(types.contains(actual), "Type mismatch " + schema + " / " + value);
+                : value.isArray() ? "array" : value.isIntegralNumber() ? "integer" : value.isBoolean() ? "boolean" : "unsupported";
+        // Composition schemas need not repeat a type; declared sibling constraints still apply.
+        if (schema.has("type")) assertTrue(types.contains(actual), "Type mismatch " + schema + " / " + value);
+        if(schema.has("const")) assertEquals(schema.get("const"),value);
+        if(value.isArray()) {
+            if(schema.has("items")) for(var item:value) validate(schema.get("items"),item);
+            if(schema.has("maxItems")) assertTrue(value.size()<=schema.path("maxItems").asInt());
+            if(schema.has("minItems")) assertTrue(value.size()>=schema.path("minItems").asInt());
+        }
         if (schema.has("enum")) {
             boolean found = false; for (var choice : schema.get("enum")) { if (choice.equals(value)) { found = true; } }
             assertTrue(found, "Enum mismatch " + value);
@@ -43,9 +60,16 @@ class OrderContractTest {
             if (!schema.path("additionalProperties").asBoolean(true)) {
                 value.fieldNames().forEachRemaining(key -> assertTrue(schema.path("properties").has(key), "Undocumented " + key));
             }
-            value.fields().forEachRemaining(field -> validate(schema.path("properties").path(field.getKey()), field.getValue()));
+            value.fields().forEachRemaining(field -> {
+                var property = schema.path("properties").path(field.getKey());
+                if (!property.isMissingNode()) validate(property, field.getValue());
+                else if (schema.path("additionalProperties").isObject()) validate(schema.get("additionalProperties"), field.getValue());
+            });
         }
         if (value.isTextual()) {
+            int length=value.asText().codePointCount(0,value.asText().length());
+            if(schema.has("minLength")) assertTrue(length>=schema.path("minLength").asInt());
+            if(schema.has("maxLength")) assertTrue(length<=schema.path("maxLength").asInt());
             if (schema.has("pattern")) { assertTrue(value.asText().matches(schema.get("pattern").asText())); }
             if ("date-time".equals(schema.path("format").asText())) { assertDoesNotThrow(() -> Instant.parse(value.asText())); }
             if (schema.path("description").asText().contains("signed BIGINT")) { assertDoesNotThrow(() -> Long.parseLong(value.asText())); }
@@ -62,7 +86,7 @@ class OrderContractTest {
     }
 
     @Test void staticContractMatchesActualRoutesBodiesAndDatabaseChecks() throws Exception {
-        spec = json.readTree(Files.readString(Bootstrap.ROOT.resolve("docs/biz03-openapi.json")));
+        spec = json.readTree(Files.readString(Bootstrap.ROOT.resolve("docs/biz04-openapi.json")));
         assertEquals("3.1.0", spec.path("openapi").asText());
         try (var h = new BookingHarness(System.getProperty("biz.runId") + "-contract")) {
             Set<String> expected = new TreeSet<>();
@@ -77,7 +101,7 @@ class OrderContractTest {
                     }
                 }
             });
-            assertEquals(expected, actual); assertEquals(6, actual.size());
+            assertEquals(expected, actual); assertEquals(10, actual.size());
             var f = h.fixture("API", 1);
             var accepted = h.post(f, "api-contract-key");
             response("/v1/booking-requests", "post", accepted);
@@ -121,7 +145,7 @@ class OrderContractTest {
             response("/v1/orders/{id}/cancel", "post", expired);
             response("/v1/orders/{id}", "get", h.request("GET", "/v1/orders/" + expId, null, null, false, true));
             h.assertCounts(expiredFixture, 1, 1, 2, 1);
-            h.save("static-contract-check.json", Map.of("routes", actual, "schemaVocabulary", "ref/anyOf/type/required/additionalProperties/enum/pattern/format/min/max",
+            h.save("static-contract-check.json", Map.of("routes", actual, "schemaVocabulary", "ref/oneOf/anyOf/type/required/additionalProperties/enum/pattern/format/min/max",
                 "httpStates", List.of("HOLD", "CANCELLED", "EXPIRED"), "sqlInvalidCombinationsRejected", 5, "onlineDocsEndpoint", false));
             h.pass(f, "Static contract vs real HTTP and SQL negative checks"); h.pass(expiredFixture, "EXPIRED response matches static schema");
             h.cleanOnClose = true;

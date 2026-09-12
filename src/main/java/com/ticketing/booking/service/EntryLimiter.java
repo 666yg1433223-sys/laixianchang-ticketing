@@ -20,7 +20,7 @@ public class EntryLimiter {
 
     public EntryLimiter(StringRedisTemplate redis, RuntimeServices runtime, Bootstrap.Ready ready) throws Exception {
         this.redis = redis; this.runtime = runtime;
-        prefix = "ticketing:biz01:it:" + ready.runId() + ":rl:";
+        prefix = runtime.productEnabled() ? "ticketing:local:rl:" : "ticketing:biz01:it:" + ready.runId() + ":rl:";
         try (var input = new ClassPathResource("lua/booking-entry-limit.lua").getInputStream()) {
             script = new DefaultRedisScript<>(new String(input.readAllBytes(),StandardCharsets.UTF_8),Long.class);
         }

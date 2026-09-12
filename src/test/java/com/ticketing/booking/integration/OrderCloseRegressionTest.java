@@ -225,7 +225,7 @@ class OrderCloseRegressionTest {
     }
     Process child(Fixture f, String mode) throws Exception {
         String cp = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
-        String options = "-Xmx256m\n-Dfile.encoding=UTF-8\n-cp\n\"" + cp.replace('\\', '/') + "\"\ncom.ticketing.booking.fixture.CloseRecoveryProcess\n"
+        String options = "-Xmx256m\n-Dfile.encoding=UTF-8\n-Dbiz.evidenceTask="+System.getProperty("biz.evidenceTask","BIZ-03-I-001")+"\n-cp\n\"" + cp.replace('\\', '/') + "\"\ncom.ticketing.booking.fixture.CloseRecoveryProcess\n"
                 + h.runId + "\n" + mode + "\n" + f.userA() + "\n" + f.userB() + "\n";
         Path args = h.evidence.resolve("S07-" + mode + "-args.txt"); Files.writeString(args, options);
         var builder = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java.exe").toString(), "@" + args)

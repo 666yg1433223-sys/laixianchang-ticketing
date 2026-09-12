@@ -33,6 +33,8 @@ public final class BookingHarness implements AutoCloseable {
     public final Set<String> passed=new LinkedHashSet<>();
     public final HttpClient http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     public boolean cleanOnClose=false;
+    private final boolean management;
+    private final boolean demo;
 
     public record Fixture(String name,long userA,long userB,long event,long session,long tier,long otherTier) { }
     public record Reply(int status,JsonNode body,Map<String,List<String>> headers) {
@@ -40,40 +42,84 @@ public final class BookingHarness implements AutoCloseable {
     }
 
     public BookingHarness(String runId) throws Exception {
+        this(runId,false);
+    }
+    public BookingHarness(String runId,boolean management) throws Exception {
+        this(runId,management,false);
+    }
+    public BookingHarness(String runId,boolean management,boolean demo) throws Exception {
         this.runId=runId;
-        evidence=Bootstrap.ROOT.resolve("evidence/BIZ-03-I-001").resolve(runId);
+        this.management=management;
+        this.demo=demo;
+        String task=System.getProperty("biz.evidenceTask",management?"BIZ-04-I-001":"BIZ-03-I-001");
+        if(!Set.of("BIZ-03-I-001","BIZ-04-I-001").contains(task)) throw new IllegalArgumentException("Invalid evidence task");
+        evidence=Bootstrap.ROOT.resolve("evidence").resolve(task).resolve(runId);
         Files.createDirectories(evidence);
         if(Files.exists(evidence.resolve("manifest.json"))) { throw new IllegalStateException("Used runId"); }
-        runtime.reset(); runtime.fixedTime=BASE; runtime.observedRedisKeys.clear();
+        runtime.disableManagement();runtime.reset(); runtime.fixedTime=BASE; runtime.observedRedisKeys.clear();
+        if(demo) { runtime.enterDemo(); }
         var secret=json.readTree(Files.readString(Bootstrap.ROOT.resolve(".local/credentials.json")));
         probe=Bootstrap.pool("ticketing_biz01_it_app",secret.path("itApp").asText(),secret.path("trustPassword").asText(),2);
         jdbc=new JdbcTemplate(probe); store=new BookingStore(jdbc);
-        startApp();
+        try {
+            if(management) {
+                if(demo) runtime.configureDemoManagement(runId,jdbc,Bootstrap.ROOT.resolve(".local/demo").resolve(runId));
+                else runtime.configureManagement(runId,jdbc);
+            }
+            startApp();
+        } catch(Exception failure) { probe.close();throw failure; }
     }
     public void startApp() {
         SpringApplication application=new SpringApplication(BookingApplication.class);
-        app=application.run("--spring.profiles.active=biz01-it","--biz.runId="+runId,"--biz.simulation.enabled=true");
+        if(demo) application.addInitializers(context -> {
+            var registration=new org.springframework.boot.web.servlet.FilterRegistrationBean<>(new com.ticketing.booking.demo.DemoIdentityFilter(runtime));
+            registration.setOrder(org.springframework.core.Ordered.HIGHEST_PRECEDENCE);
+            registration.addUrlPatterns("/*");
+            context.getBeanFactory().registerSingleton("demoIdentityGate",registration);
+        });
+        app=application.run("--spring.profiles.active=biz01-it","--biz.runId="+runId,"--biz.simulation.enabled=true","--biz.sim.management.enabled="+management);
     }
     public void stopApp() { if(app!=null){app.close(); app=null;} }
     public Fixture fixture(String name,int capacity) throws Exception {
-        runtime.reset(); runtime.fixedTime=BASE;
+        return fixtureAt(name,capacity,BASE);
+    }
+    public Fixture fixtureAt(String name,int capacity,Instant base) throws Exception {
+        if(!name.matches("[A-Za-z0-9_-]{1,70}") || capacity<0) throw new IllegalArgumentException("Invalid fixture");
+        runtime.reset(); runtime.fixedTime=demo?null:base;
+        if(demo) { runtime.direct=false;runtime.recovery=false; }
         long a=store.insert("INSERT INTO app_user(subject_key,nickname) VALUES(?,?)",runId+":"+name+":a","fixture A");
         long b=store.insert("INSERT INTO app_user(subject_key,nickname) VALUES(?,?)",runId+":"+name+":b","fixture B");
         long event=store.insert("INSERT INTO event(title) VALUES(?)",runId+":"+name);
         long session=store.insert("INSERT INTO event_session(event_id,start_at,booking_open_at,booking_close_at,state) VALUES(?,?,?,?,'OPEN')",
-            event,sqlTime(BASE.plusSeconds(7200)),sqlTime(BASE.minusSeconds(60)),sqlTime(BASE.plusSeconds(3600)));
+            event,sqlTime(base.plusSeconds(7200)),sqlTime(base.minusSeconds(60)),sqlTime(base.plusSeconds(3600)));
         long tier=store.insert("INSERT INTO ticket_tier(session_id,name,capacity,available,unit_price_cent) VALUES(?,?,?,?,9900)",session,"standard",capacity,capacity);
         long other=store.insert("INSERT INTO ticket_tier(session_id,name,capacity,available,unit_price_cent) VALUES(?,?,?,?,11900)",session,"alternate",capacity,capacity);
         Fixture f=new Fixture(name,a,b,event,session,tier,other); fixtures.add(f);
         runtime.userA=a; runtime.userB=b;
         save("manifest.json",fixtures);
+        runtime.enrollManagementFixture(jdbc,f);
         return f;
     }
+    public void refreshManagementAttempts(Fixture f) throws Exception { runtime.enrollManagementFixture(jdbc,f); }
     public String input(Fixture f) { return "{\"sessionId\":\""+f.session()+"\",\"tierId\":\""+f.tier()+"\",\"quantity\":1}"; }
     public Reply post(Fixture f,String key) throws Exception { return request("POST","/v1/booking-requests",input(f),key,false,true); }
     public Reply request(String method,String path,String body,String key,boolean second,boolean auth) throws Exception {
+        return authenticatedRequest(method,path,body,key,auth?runtime.token(second):null);
+    }
+    public Reply managementRequest(String method,String path,String body,String key,String identity) throws Exception {
+        return authenticatedRequest(method,path,body,managementKey(runId,key),identity==null?null:runtime.operatorToken(identity));
+    }
+    /** Test runs share operator identities, so only valid client keys get a run-specific namespace. */
+    public static String managementKey(String runId,String key) {
+        if(key==null || !key.matches("[A-Za-z0-9._:-]{8,64}")) return key;
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest((runId+"|"+key).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch(java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+    private Reply authenticatedRequest(String method,String path,String body,String key,String token) throws Exception {
         var builder=HttpRequest.newBuilder(URI.create("http://127.0.0.1:18083"+path)).timeout(Duration.ofSeconds(15));
-        if(auth){builder.header("Authorization","Bearer "+runtime.token(second));}
+        if(token!=null){builder.header("Authorization","Bearer "+token);}
         if(key!=null){builder.header("Idempotency-Key",key);}
         if(body!=null){builder.header("Content-Type","application/json");builder.method(method,HttpRequest.BodyPublishers.ofString(body));}
         else{builder.method(method,HttpRequest.BodyPublishers.noBody());}
@@ -93,6 +139,7 @@ public final class BookingHarness implements AutoCloseable {
         data.put("E",jdbc.queryForList("SELECT e.* FROM outbox_event e JOIN booking_request r ON r.id=e.booking_request_id WHERE r.session_id=? AND r.user_id IN (?,?) ORDER BY e.id",f.session(),f.userA(),f.userB()));
         data.put("P",jdbc.queryForList("SELECT * FROM payment_attempt WHERE session_id=? AND user_id IN (?,?) ORDER BY id",f.session(),f.userA(),f.userB()));
         data.put("PE",jdbc.queryForList("SELECT e.* FROM outbox_event e JOIN payment_attempt a ON a.id=e.payment_attempt_id WHERE a.session_id=? AND a.user_id IN (?,?) ORDER BY e.id",f.session(),f.userA(),f.userB()));
+        data.put("operations",jdbc.queryForList("SELECT op.* FROM sim_payment_operation op JOIN payment_attempt a ON a.id=op.attempt_id WHERE a.session_id=? AND a.user_id IN (?,?) ORDER BY op.operation_id",f.session(),f.userA(),f.userB()));
         data.put("inventory",jdbc.queryForList("SELECT id,capacity,available FROM ticket_tier WHERE id IN (?,?) ORDER BY id",f.tier(),f.otherTier()));
         return data;
     }
@@ -173,6 +220,7 @@ public final class BookingHarness implements AutoCloseable {
             for(long order:orders){
                 var attempts=jdbc.queryForList("SELECT id FROM payment_attempt WHERE order_id=? AND user_id IN (?,?)",Long.class,order,f.userA(),f.userB());
                 for(long attempt:attempts) {
+                    jdbc.update("DELETE FROM sim_payment_operation WHERE attempt_id=?",attempt);
                     jdbc.update("DELETE FROM outbox_event WHERE payment_attempt_id=? AND event_type='PAYMENT_RESULT_RECORDED'",attempt);
                     one(jdbc.update("DELETE FROM payment_attempt WHERE id=? AND order_id=?",attempt,order));
                 }
@@ -206,6 +254,6 @@ public final class BookingHarness implements AutoCloseable {
             }
             if(cleanOnClose){for(Fixture f:fixtures){cleanup(f);}}
             save("completion.json",Map.of("runId",runId,"passedCases",passed,"cleaned",cleanOnClose,"fixtureCount",fixtures.size()));
-        }finally{stopApp(); probe.close();}
+        }finally{stopApp(); probe.close();if(demo)runtime.leaveDemo();}
     }
 }

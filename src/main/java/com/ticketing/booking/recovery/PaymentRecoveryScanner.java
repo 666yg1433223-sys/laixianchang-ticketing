@@ -19,7 +19,7 @@ public class PaymentRecoveryScanner {
     }
     @Scheduled(fixedDelay=1000,initialDelay=1000)
     public void generateTick() {
-        if(runtime.recoveryEnabled()) { generateOnce(); }
+        if(runtime.settlementRecoveryEnabled()) { generateOnce(); }
     }
     public void generateOnce() {
         if(!payment.enabled()) { return; }
@@ -28,7 +28,7 @@ public class PaymentRecoveryScanner {
     }
     @Scheduled(fixedDelay=1000,initialDelay=1000)
     public void settleTick() {
-        if(runtime.recoveryEnabled()) { settleOnce(); }
+        if(runtime.settlementRecoveryEnabled()) { settleOnce(); }
     }
     public void settleOnce() {
         try { for(long id:candidates(1)) { payment.settle(id); } }

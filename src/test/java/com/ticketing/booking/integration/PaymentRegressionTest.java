@@ -221,7 +221,7 @@ class PaymentRegressionTest {
     }
     Process child(Fixture f,long attempt,String mode) throws Exception {
         String cp=System.getProperty("surefire.test.class.path",System.getProperty("java.class.path"));
-        String options="-Xmx256m\n-Dfile.encoding=UTF-8\n-cp\n\""+cp.replace('\\','/')+"\"\ncom.ticketing.booking.fixture.PaymentRecoveryProcess\n"+h.runId+"\n"+mode+"\n"+f.userA()+"\n"+f.userB()+"\n"+attempt+"\n";
+        String options="-Xmx256m\n-Dfile.encoding=UTF-8\n-Dbiz.evidenceTask="+System.getProperty("biz.evidenceTask","BIZ-03-I-001")+"\n-cp\n\""+cp.replace('\\','/')+"\"\ncom.ticketing.booking.fixture.PaymentRecoveryProcess\n"+h.runId+"\n"+mode+"\n"+f.userA()+"\n"+f.userB()+"\n"+attempt+"\n";
         Path args=h.evidence.resolve("Q10-"+mode+"-args.txt");Files.writeString(args,options);
         var child=new ProcessBuilder(Path.of(System.getProperty("java.home"),"bin","java.exe").toString(),"@"+args)
             .directory(Bootstrap.ROOT.toFile()).redirectErrorStream(true).redirectOutput(h.evidence.resolve("Q10-"+mode+"-process.log").toFile()).start();

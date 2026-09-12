@@ -20,7 +20,7 @@ public final class CloseRecoveryProcess {
         var runtime = TestRuntime.instance(); runtime.reset();
         runtime.userA = Long.parseLong(args[2]); runtime.userB = Long.parseLong(args[3]);
         runtime.fixedTime = mode.equals("crash") ? BookingHarness.BASE : BookingHarness.BASE.plusSeconds(600);
-        Path evidence = Bootstrap.ROOT.resolve("evidence/BIZ-03-I-001").resolve(run);
+        Path evidence = Bootstrap.evidenceDirectory(run);
         var json = new ObjectMapper();
         if (mode.equals("crash")) {
             runtime.hooks.put("T2_COMMITTED", id -> {
