@@ -16,7 +16,7 @@ public class Diagnostics {
             String message=failure instanceof com.ticketing.booking.domain.ApiFailure api?api.code():failure.getMessage();
             String code="DEPENDENCY_UNAVAILABLE";
             for(String allowed:java.util.List.of("EXPIRY_CLOSE_FAILED","PAYMENT_SETTLEMENT_FAILED",
-                    "TRUSTED_RESULT_INCONSISTENT","PAYMENT_TRUSTED_RESULT_INCONSISTENT",
+                    "TRUSTED_RESULT_INCONSISTENT","PAYMENT_TRUSTED_RESULT_INCONSISTENT","REFUND_SETTLEMENT_FAILED",
                     "UNAUTHENTICATED","SIM_MANAGEMENT_FORBIDDEN","INVALID_ARGUMENT","RESOURCE_NOT_FOUND",
                     "IDEMPOTENCY_CONFLICT","OPERATION_ACCEPTANCE_UNKNOWN","DEPENDENCY_UNAVAILABLE")) {
                 if(message!=null && (message.equals(allowed) || message.startsWith(allowed+":") || message.startsWith(allowed+" "))) { code=allowed;break; }

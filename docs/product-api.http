@@ -22,11 +22,14 @@
 @requestId = REPLACE_WITH_REQUEST_ID
 @orderId = REPLACE_WITH_ORDER_ID
 @attemptId = REPLACE_WITH_ATTEMPT_ID
+@refundId = REPLACE_WITH_REFUND_ID
 @waitlistId = REPLACE_WITH_WAITLIST_ID
 @failureEventId = REPLACE_WITH_FAILURE_EVENT_ID
 @operationId = REPLACE_WITH_RECOVERY_OPERATION_UUID
 @bookingKey = http-booking-001
 @paymentKey = http-payment-001
+@refundKey = http-refund-001
+@refundRecoveryKey = http-refund-recovery-001
 @waitlistKey = http-waitlist-001
 @recoveryKey = http-recovery-001
 
@@ -242,6 +245,37 @@ Content-Type: application/json
 ### 管理员查询付款恢复操作；仅用于上一请求确实返回 operationId 的情况
 # 查看 status 和 result；受理响应不代表付款已经完成。
 GET {{baseUrl}}/v1/admin/processing-failures/operations/{{operationId}}
+Authorization: Bearer {{adminToken}}
+
+### 本人申请全额模拟退款；仅已付款且活动开始前可以受理
+# 202 表示已受理，尚未退款成功。保存 refundId；超时重试保留相同 key 和 reason。
+# 金额由原订单决定，不能在请求中提交金额。退款成功后释放名额，售票期间候补优先补位。
+POST {{baseUrl}}/v1/orders/{{orderId}}/refunds
+Authorization: Bearer {{userToken}}
+Idempotency-Key: {{refundKey}}
+Content-Type: application/json
+
+{"reason":"计划有变"}
+
+### 查询本人退款；PENDING 处理中，SUCCEEDED 已退款，REVIEW 等待管理员处理
+# 原付款仍保持 SUCCESS/APPLIED；是否退票应同时看 orderStatus 和退款状态。
+GET {{baseUrl}}/v1/refunds/{{refundId}}
+Authorization: Bearer {{userToken}}
+
+### 管理员查询需要继续处理的退款；正常情况 items 为空
+GET {{baseUrl}}/v1/admin/refunds?status=REVIEW&page=1&size=20
+Authorization: Bearer {{adminToken}}
+
+### 管理员恢复退款；处理实际故障后再试，沿用原退款号和金额
+POST {{baseUrl}}/v1/admin/refunds/{{refundId}}/retry
+Authorization: Bearer {{adminToken}}
+Idempotency-Key: {{refundRecoveryKey}}
+Content-Type: application/json
+
+{"reason":"依赖已恢复，继续处理原退款"}
+
+### 管理员查询退款结果；可查询其他用户退款，普通用户不能访问
+GET {{baseUrl}}/v1/admin/refunds/{{refundId}}
 Authorization: Bearer {{adminToken}}
 
 ### 使用结束后：普通用户退出登录；此后该 userToken 失效

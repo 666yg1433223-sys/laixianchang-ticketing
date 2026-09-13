@@ -21,7 +21,7 @@ public class IdentityFilter extends OncePerRequestFilter {
             throws ServletException,IOException {
         String path = request.getRequestURI();
         if (path.startsWith("/v1/booking-requests") || path.startsWith("/v1/orders")
-                || path.startsWith("/v1/payment-attempts") || path.startsWith("/v1/waitlist")
+                || path.startsWith("/v1/payment-attempts") || path.startsWith("/v1/waitlist") || path.startsWith("/v1/refunds")
                 || path.startsWith("/v1/admin") || path.equals("/v1/auth/me") || path.equals("/v1/auth/logout")) {
             try {
                 long principal = runtime.authenticate(request.getHeader("Authorization"));

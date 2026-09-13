@@ -45,7 +45,7 @@ public final class ProductLiveHarness implements AutoCloseable {
         ctx.getBean(ScheduledAnnotationBeanPostProcessor.class).destroy();
         jdbc=ctx.getBean(JdbcTemplate.class);redis=ctx.getBean(StringRedisTemplate.class);
         assertEquals("ticketing_biz01",jdbc.queryForObject("SELECT DATABASE()",String.class));
-        assertEquals(6,jdbc.queryForObject("SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success=1",Integer.class));
+        assertEquals(7,jdbc.queryForObject("SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success=1",Integer.class));
         admin=login(adminPhone);
         assertEquals("ADMIN",call("GET","/v1/auth/me",admin,null,null).body().path("role").asText());
     }
@@ -115,7 +115,7 @@ public final class ProductLiveHarness implements AutoCloseable {
     public void flushWork() {
         var stream=ctx.getBean(BookingStream.class);stream.dispatch();stream.consume();
         ctx.getBean(PaymentRecoveryScanner.class).generateOnce();ctx.getBean(PaymentRecoveryScanner.class).settleOnce();
-        ctx.getBean(OrderExpiryScanner.class).scanOnce();ctx.getBean(WaitlistScanner.class).scan();ctx.getBean(CatalogueInvalidator.class).tick();
+        ctx.getBean(RefundScanner.class).scan();ctx.getBean(OrderExpiryScanner.class).scanOnce();ctx.getBean(WaitlistScanner.class).scan();ctx.getBean(CatalogueInvalidator.class).tick();
     }
     public long book(Token user,Catalogue c) throws Exception {
         var accepted=call("POST","/v1/booking-requests",user,Map.of("sessionId",Long.toString(c.sessionId()),"tierId",Long.toString(c.tierId()),"quantity",1),UUID.randomUUID().toString());
@@ -124,11 +124,11 @@ public final class ProductLiveHarness implements AutoCloseable {
         assertEquals("SUCCEEDED",r.body().path("status").asText(),r.body().toString());return r.body().path("order").path("orderId").asLong();
     }
     public void invariant(Catalogue c) {
-        long allocated=jdbc.queryForObject("SELECT COUNT(*) FROM booking_order WHERE tier_id=? AND status IN ('HOLD','PAID')",Long.class,c.tierId());
+        long allocated=jdbc.queryForObject("SELECT COUNT(*) FROM booking_order WHERE tier_id=? AND status IN ('HOLD','PAID','REFUNDING')",Long.class,c.tierId());
         var t=jdbc.queryForMap("SELECT capacity,available FROM ticket_tier WHERE id=?",c.tierId());
         assertEquals(((Number)t.get("capacity")).longValue()-((Number)t.get("available")).longValue(),allocated);
-        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM booking_order o LEFT JOIN user_session_quota q ON q.user_id=o.user_id AND q.session_id=o.session_id WHERE o.tier_id=? AND o.status IN ('HOLD','PAID') AND (q.owner_type<>'ORDER' OR q.owner_id<>o.id OR q.owner_id IS NULL)",Integer.class,c.tierId()));
-        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM booking_order o WHERE o.tier_id=? AND ((SELECT COUNT(*) FROM inventory_ledger l WHERE l.order_id=o.id AND l.action='RESERVE')<>1 OR (SELECT COUNT(*) FROM inventory_ledger l WHERE l.order_id=o.id AND l.action='RELEASE')<>IF(o.status IN ('CANCELLED','EXPIRED'),1,0))",Integer.class,c.tierId()));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM booking_order o LEFT JOIN user_session_quota q ON q.user_id=o.user_id AND q.session_id=o.session_id WHERE o.tier_id=? AND o.status IN ('HOLD','PAID','REFUNDING') AND (q.owner_type<>'ORDER' OR q.owner_id<>o.id OR q.owner_id IS NULL)",Integer.class,c.tierId()));
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM booking_order o WHERE o.tier_id=? AND ((SELECT COUNT(*) FROM inventory_ledger l WHERE l.order_id=o.id AND l.action='RESERVE')<>1 OR (SELECT COUNT(*) FROM inventory_ledger l WHERE l.order_id=o.id AND l.action='RELEASE')<>IF(o.status IN ('CANCELLED','EXPIRED','REFUNDED'),1,0))",Integer.class,c.tierId()));
     }
     private static String phone() { return "139"+String.format(Locale.ROOT,"%08d",java.util.concurrent.ThreadLocalRandom.current().nextInt(100_000_000)); }
     public void close() { ctx.close(); }

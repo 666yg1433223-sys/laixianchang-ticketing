@@ -12,7 +12,7 @@ import static org.mockito.Mockito.*;
 class IdentityFilterOfflineTest {
     @Test void allPersonalAndAdminEntryPointsRequireIdentity() throws Exception {
         for (String path : new String[]{"/v1/orders", "/v1/booking-requests/1", "/v1/payment-attempts/1",
-                "/v1/waitlist", "/v1/admin/events", "/v1/auth/me", "/v1/auth/logout"}) {
+                "/v1/refunds/1", "/v1/waitlist", "/v1/admin/events", "/v1/admin/refunds", "/v1/auth/me", "/v1/auth/logout"}) {
             var runtime = mock(RuntimeServices.class);
             when(runtime.authenticate(null)).thenThrow(new ApiFailure(401, "UNAUTHENTICATED"));
             var response = new MockHttpServletResponse();

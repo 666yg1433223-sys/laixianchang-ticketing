@@ -87,7 +87,8 @@ public class PaymentService {
             "statusUrl","/v1/payment-attempts/"+number(a,"id"),"simulated",true,"message","模拟支付，无真实资金");
     }
     public Map<String,Object> query(long user,long id) {
-        var a=store.optional("SELECT a.*,o.status AS order_status,o.current_attempt_id,o.paid_attempt_id,o.paid_at FROM payment_attempt a JOIN booking_order o ON o.id=a.order_id AND o.user_id=a.user_id AND o.session_id=a.session_id WHERE a.id=? AND a.user_id=?",id,user);
+        String refunds=runtime.productEnabled()?",o.current_refund_id,o.refunded_at,s.start_at AS refund_deadline":"";
+        var a=store.optional("SELECT a.*,o.status AS order_status,o.current_attempt_id,o.paid_attempt_id,o.paid_at"+refunds+" FROM payment_attempt a JOIN booking_order o ON o.id=a.order_id AND o.user_id=a.user_id AND o.session_id=a.session_id JOIN event_session s ON s.id=o.session_id WHERE a.id=? AND a.user_id=?",id,user);
         if(a==null) { throw new ApiFailure(404,"RESOURCE_NOT_FOUND"); }
         Map<String,Object> v=new LinkedHashMap<>(envelope(a));
         for(var field:Map.of("resultStatus","result_status","settlementStatus","settlement_status","amountCent","amount_cent","currency","currency","orderStatus","order_status","resultId","result_id","resultReason","result_reason","reviewReason","review_reason","compensationId","compensation_id","compensationCent","compensation_cent").entrySet()) v.put(field.getKey(),a.get(field.getValue()));
@@ -250,7 +251,7 @@ public class PaymentService {
         if(rows.size()!=1 || !"RESERVE".equals(rows.get(0).get("action")) || number(rows.get(0),"delta")!=-1
             || number(rows.get(0),"tier_id")!=number(o,"tier_id")) { throw new IllegalStateException("PAYMENT_LEDGER_INCONSISTENT"); }
     }
-    private static byte[] digest(Map<String,Object> a) {
+    static byte[] digest(Map<String,Object> a) {
         try {
             String text="v1|"+number(a,"id")+"|"+number(a,"order_id")+"|"+number(a,"user_id")+"|"+number(a,"session_id")+"|"+number(a,"amount_cent")+"|"+a.get("currency")+"|"+a.get("result_status")+"|"+a.get("result_id")+"|"+time(a.get("result_at"))+"|"+a.get("result_reason");
             return MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8));

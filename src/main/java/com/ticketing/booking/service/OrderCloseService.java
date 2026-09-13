@@ -28,9 +28,15 @@ public class OrderCloseService {
     }
 
     public Map<String, Object> query(long user, long orderId) {
-        var order = store.optional("SELECT * FROM booking_order WHERE id=? AND user_id=?", orderId, user);
+        var order = store.optional("SELECT o.*,s.start_at AS refund_deadline,UTC_TIMESTAMP(3) AS refund_clock FROM booking_order o JOIN event_session s ON s.id=o.session_id WHERE o.id=? AND o.user_id=?", orderId, user);
         if (order == null) { throw new ApiFailure(404, "RESOURCE_NOT_FOUND"); }
-        return view(order);
+        var result = view(order);
+        if (order.containsKey("current_refund_id")) {
+            result.put("refundEligible", runtime.productEnabled() && runtime.simulatorEnabled()
+                && "PAID".equals(order.get("status"))
+                && instant(order.get("refund_clock")).isBefore(instant(order.get("refund_deadline"))));
+        }
+        return result;
     }
 
     public Map<String, Object> cancel(long user, long orderId) {
@@ -64,7 +70,7 @@ public class OrderCloseService {
         if (cancelRequested && actor == null) { throw new IllegalArgumentException("CANCEL_REQUIRES_ACTOR"); }
         var locked = lockOrder(orderId, actor);
         String state = (String) locked.order().get("status");
-        if ("CANCELLED".equals(state) || "EXPIRED".equals(state)) { return view(locked.order()); }
+        if ("CANCELLED".equals(state) || "EXPIRED".equals(state) || "REFUNDED".equals(state)) { return view(locked.order()); }
         runtime.at("CLOSE_LOCKS_ACQUIRED", orderId);
         return closeLocked(locked, runtime.afterLocks(store.jdbc()), cancelRequested);
     }
@@ -100,7 +106,11 @@ public class OrderCloseService {
         var order=locked.order(); var inventory=locked.inventory(); var quota=locked.quota(); var request=locked.request();
         long orderId=number(order,"id"), user=number(order,"user_id"), session=number(order,"session_id"), tier=number(order,"tier_id");
         String state=(String)order.get("status");
-        if ("CANCELLED".equals(state) || "EXPIRED".equals(state)) { return view(order); }
+        if ("CANCELLED".equals(state) || "EXPIRED".equals(state) || "REFUNDED".equals(state)) { return view(order); }
+        if ("REFUNDING".equals(state)) {
+            if (cancelRequested) { throw new ApiFailure(409,"REFUND_IN_PROGRESS"); }
+            return view(order);
+        }
         if ("PAID".equals(state)) {
             if (cancelRequested) { throw new ApiFailure(409,"PAID_CANCEL_DISABLED"); }
             return view(order);
@@ -162,6 +172,15 @@ public class OrderCloseService {
         result.put("currentAttemptId",row.get("current_attempt_id")==null?null:Long.toString(number(row,"current_attempt_id")));
         result.put("paidAttemptId",row.get("paid_attempt_id")==null?null:Long.toString(number(row,"paid_attempt_id")));
         result.put("paidAt",row.get("paid_at")==null?null:time(row.get("paid_at")));
+        refundLinks(row,result);
+    }
+
+    /** Product-only additions: old integration schemas and contracts have no refund columns. */
+    public static void refundLinks(Map<String,Object> row, Map<String,Object> result) {
+        if (!row.containsKey("current_refund_id")) { return; }
+        result.put("currentRefundId",row.get("current_refund_id")==null?null:Long.toString(number(row,"current_refund_id")));
+        result.put("refundedAt",row.get("refunded_at")==null?null:time(row.get("refunded_at")));
+        if (row.get("refund_deadline")!=null) { result.put("refundDeadline",time(row.get("refund_deadline"))); }
     }
 
     public static boolean validSource(LockedOrder locked) {

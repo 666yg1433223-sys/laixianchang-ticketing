@@ -28,7 +28,9 @@ pwsh -File scripts/run-local.ps1 -Action Code -Phone 13900000000
 - 管理员：创建与修改活动、草稿场次和票档 → 发布 → 暂停或恢复受理 → 查看失败处理记录并填写原因重试。
 - 后台：MySQL 持久请求与 Outbox、Redis Stream 投递/消费/认领、有限重试、订单到期释放、候补补位、缓存失效重试。
 
-“已受理”只表示请求已保存；只有订单显示“已付款”才表示模拟付款已结算。每人每场次最多一个有效订单或候补资格，每次一张票。待付款限时 10 分钟（不晚于售卖截止）；已付款不能取消。本项目不接真实短信、真实资金、固定选座或已付款退款。
+“已受理”只表示请求已保存；只有订单显示“已付款”才表示模拟付款已结算。每人每场次最多一个有效订单或候补资格，每次一张票。待付款限时 10 分钟（不晚于售卖截止），可以取消；已付款在活动开始前可以申请全额模拟退款。本项目不接真实短信、真实资金或固定选座。
+
+退款入口在“我的票夹”的已付款订单中。填写原因并提交后显示“退款处理中”，成功后显示“已退款·模拟”，原付款记录保留。退款成功才释放名额与本人资格，售票期间优先候补补位；退完后可以重新购票。重复点击或网络超时沿用原申请，避免重复退款或多加库存。连续技术故障会转为待处理，管理员可在“异常处理”中填写原因继续原退款。
 
 页面在同一应用中提供，无需另装前端工具或 Nginx。交易正确性由 MySQL 事务、条件更新和唯一约束保证；Redis 的展示余量可能短暂滞后，不决定交易是否成功。Stream 允许重复投递，业务处理保证同一来源不会重复创建订单；当前保留历史消息和失败证据，不自动截断未完成消息。
 
@@ -40,7 +42,7 @@ pwsh -File scripts/run-local.ps1 -Action Code -Phone 13900000000
 # 编译与全部离线测试
 ./scripts/invoke-maven.ps1 -MavenArgs @('-o','-Dtest=*OfflineTest','test')
 # 真实产品接口、目录缓存、消息、候补和管理恢复；网站须先停止以释放18082端口
-./scripts/invoke-maven.ps1 -MavenArgs @('-o','-Dproduct.live=true','-Dtest=ProductCatalogueIntegrationTest,ProductFlowIntegrationTest,ProductRecoveryIntegrationTest','test')
+./scripts/invoke-maven.ps1 -MavenArgs @('-o','-Dproduct.live=true','-Dtest=ProductCatalogueIntegrationTest,ProductFlowIntegrationTest,ProductRecoveryIntegrationTest,ProductRefundIntegrationTest,ProductRefundRestartIntegrationTest','test')
 # 原有付款/取消/事务并发回归，使用全新RunId及既有隔离IT库
 ./scripts/verify-biz04.ps1 -RunId 'your-fresh-run-id' -Stage Full -UseExistingIntegrationEnvironment
 # 打包
@@ -51,7 +53,9 @@ pwsh -File scripts/run-local.ps1 -Action Code -Phone 13900000000
 
 接口操作集合见 [product-api.http](docs/product-api.http)。执行证据保存在被 Git 忽略的 `evidence/`；原失败记录保留。源码和测试由 AI 辅助开发，运行验证不等于学习者已经掌握，也不代表生产环境性能或高可用保证。`.local`、`.m2`、日志和真实凭据不提交。
 
-2026-09-13 接续开发的实际结果：17 项产品集成与 242 项原有回归均通过，失败、错误、跳过均为 0；最新 JAR 已构建并启动。真实浏览器完成管理员登录、创建活动/场次/票档并发布、普通用户异步购票、取消释放、第二用户候补补位及手动模拟付款。订单刷新后保留，两个测试标签页未捕获到控制台错误，390px 小屏首页和票夹无横向溢出。启动、重复启动、正常停止、重复停止及再次启动已实际验证。证据索引：[本次交付验证](evidence/product/resume-0913-delivery/verification.json)。
+2026-09-13 新增退款后的结果：32 项产品集成（含 15 项退款与应用重启恢复）、242 项原有回归、1 项 V7 升级检查全部通过，失败、错误、跳过均为 0。升级前后 15 张业务表的 1074 条旧数据和旧列保持一致；原迁移未修改。最新 JAR 已启动，真实网页完成购票、付款、退款受理、退款成功及刷新后保留；原付款记录仍显示正确历史，390px 退款弹窗无横向溢出，管理员退款异常列表正常。退款重启测试为关闭并重建 Spring 应用，不代表操作系统崩溃验证。证据索引：[退款验证](evidence/product/refund-0913/verification.json)。
+
+此前接续开发的 17 项产品与 242 项回归、完整购票/候补浏览器体验及启动封装证据保留在 [接续交付验证](evidence/product/resume-0913-delivery/verification.json)，不与本次重复累加。
 
 ## 历史后端演示与证据
 
