@@ -49,7 +49,7 @@ class OrderCloseRegressionTest {
     Reply order(long id) throws Exception { return h.request("GET", "/v1/orders/" + id, null, null, false, true); }
     OrderExpiryScanner scanner() { return h.app.getBean(OrderExpiryScanner.class); }
     OrderExpiryScanner independentScanner() {
-        return new OrderExpiryScanner(h.store, h.runtime, h.app.getBean(OrderCloseService.class), h.app.getBean(Diagnostics.class));
+        return new OrderExpiryScanner(new com.ticketing.booking.repository.RecoveryRepository(h.jdbc),new com.ticketing.booking.repository.DatabaseTimeRepository(h.jdbc), h.runtime, h.app.getBean(OrderCloseService.class), h.app.getBean(Diagnostics.class));
     }
     String status(long id) { return h.jdbc.queryForObject("SELECT status FROM booking_order WHERE id=?", String.class, id); }
     void done(String code, String notes, List<Fixture> fixtures) throws Exception {

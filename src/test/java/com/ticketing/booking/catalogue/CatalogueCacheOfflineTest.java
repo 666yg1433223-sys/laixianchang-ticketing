@@ -2,7 +2,9 @@ package com.ticketing.booking.catalogue;
 
 import com.ticketing.booking.domain.ApiFailure;
 import java.time.Duration;
-import java.util.Map;
+import com.ticketing.booking.model.vo.EventDetailVO;
+import com.ticketing.booking.model.vo.SessionTiersVO;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,7 +27,7 @@ class CatalogueCacheOfflineTest {
     }
     @Test void validHitNeverLoadsDatabaseOrTakesLock() {
         when(values.get(anyString())).thenReturn("{\"version\":1,\"data\":{\"eventId\":\"5\"}}");
-        assertEquals("5",cache.event(5,()->{throw new AssertionError();}).get("eventId"));
+        assertEquals("5",cache.event(5,()->{throw new AssertionError();}).eventId());
         verifyNoInteractions(redisson);
     }
     @Test void absentMarkerIsNotCacheMiss() {
@@ -35,7 +37,7 @@ class CatalogueCacheOfflineTest {
     }
     @Test void coldExistingValueHasRealJitteredTtlAndUnlocks() {
         AtomicInteger reads=new AtomicInteger();
-        assertEquals("5",cache.event(5,()->{reads.incrementAndGet();return Map.of("eventId","5");}).get("eventId"));
+        assertEquals("5",cache.event(5,()->{reads.incrementAndGet();return new EventDetailVO("5", "X", "", "", List.of());}).eventId());
         assertEquals(1,reads.get());
         verify(values).set(eq("booking:local:cache:event:5"),contains("\"eventId\":\"5\""),argThat((Duration d)->d.getSeconds()>=60&&d.getSeconds()<=90));
         verify(lock).unlock();
@@ -52,12 +54,12 @@ class CatalogueCacheOfflineTest {
     }
     @Test void lockIsFollowedByASecondCacheRead() {
         when(values.get(anyString())).thenReturn(null,"{\"version\":1,\"data\":{\"eventId\":\"5\"}}");
-        assertEquals("5",cache.event(5,()->{throw new AssertionError();}).get("eventId"));
+        assertEquals("5",cache.event(5,()->{throw new AssertionError();}).eventId());
         verify(values,times(2)).get("booking:local:cache:event:5");
     }
     @Test void redisFailureAllowsPublicSourceRead() {
         when(values.get(anyString())).thenThrow(new IllegalStateException("connection unavailable"));
-        assertEquals("5",cache.event(5,()->Map.of("eventId","5")).get("eventId"));
+        assertEquals("5",cache.event(5,()->new EventDetailVO("5", "X", "", "", List.of())).eventId());
         verifyNoInteractions(redisson);
     }
     @Test void failedSourceIsNotRepeatedAsIfRedisHadFailed() {
@@ -66,18 +68,31 @@ class CatalogueCacheOfflineTest {
         assertEquals(1,queries.get());
     }
     @Test void tierReferenceDataExpiresAfterFiveSeconds() {
-        cache.tiers(9,()->Map.of("sessionId","9","items",java.util.List.of()));
+        cache.tiers(9,()->new SessionTiersVO("9", "5", "OPEN", "", "", "", List.of(), "notice"));
         verify(values).set(eq("booking:local:cache:tiers:9"),anyString(),eq(Duration.ofSeconds(5)));
     }
     @Test void corruptCacheIsDeletedAndColdLoaded() {
         when(values.get(anyString())).thenReturn("not json",null);
-        assertEquals("5",cache.event(5,()->Map.of("eventId","5")).get("eventId"));
+        assertEquals("5",cache.event(5,()->new EventDetailVO("5", "X", "", "", List.of())).eventId());
         verify(redis).delete("booking:local:cache:event:5");
     }
     @Test void invalidationDeletesOnlyNamedKeys() {
         cache.invalidate(5,9L);
         verify(redis).delete("booking:local:cache:event:5");verify(redis).delete("booking:local:cache:tiers:9");
         verifyNoMoreInteractions(redis);
+    }
+    @Test void typedCacheReadsExistingVersionOneJsonWithoutAddingAdminFields() throws Exception {
+        String original = """
+            {"version":1,"data":{"eventId":"5","title":"X","description":"","venueText":"剧场","sessions":[
+              {"sessionId":"9","eventId":"5","state":"OPEN","startAt":"2026-09-13T12:00:00.000Z",
+               "bookingOpenAt":"2026-09-13T10:00:00.000Z","bookingCloseAt":"2026-09-13T11:00:00.000Z"}]}}
+            """;
+        when(values.get(anyString())).thenReturn(original);
+        var result = cache.event(5, () -> { throw new AssertionError("old cache should remain readable"); });
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        assertEquals(json.readTree(original).get("data"), json.valueToTree(result));
+        assertNull(result.sessions().get(0).ticketTiers());
+        verifyNoInteractions(redisson);
     }
     @Test void fallbackHasOnlyEightConcurrentDatabaseSlots() throws Exception {
         var pool=java.util.concurrent.Executors.newFixedThreadPool(8);

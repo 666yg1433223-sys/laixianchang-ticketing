@@ -1,8 +1,16 @@
 package com.ticketing.booking.api;
 
+import com.ticketing.booking.controller.*;
+import com.ticketing.booking.security.*;
+import com.ticketing.booking.exception.*;
+import com.ticketing.booking.model.dto.PaymentRecoveryDTO;
+import com.ticketing.booking.model.dto.PaymentRedeliveryDTO;
+import com.ticketing.booking.model.vo.PaymentOperationVO;
+import com.ticketing.booking.model.vo.PaymentReviewPageVO;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.ticketing.booking.auth.PaymentManagementAccess;
-import com.ticketing.booking.auth.PaymentManagementAccess.Operator;
+import com.ticketing.booking.security.PaymentManagementAccess;
+import com.ticketing.booking.security.PaymentManagementAccess.Operator;
 import com.ticketing.booking.config.Diagnostics;
 import com.ticketing.booking.config.RuntimeServices;
 import com.ticketing.booking.domain.ApiFailure;
@@ -43,6 +51,14 @@ class PaymentManagementApiOfflineTest {
     private PaymentManagementService service;
     private Diagnostics diagnostics;
     private MockMvc mvc;
+
+    private static PaymentOperationVO receipt(String state) {
+        return new PaymentOperationVO(OPERATION,"41","11","0","RECOVER","11","retry",1,state,
+                "COMPLETED".equals(state)?"APPLIED":null,"REVIEW","DEAD",6,"PAYMENT_TECHNICAL_FAILURE",
+                "REJECTED".equals(state)?null:"2030-06-01T10:00:00.000Z",
+                "ACCEPTED".equals(state)?null:"2030-06-01T10:00:00.000Z",
+                "REJECTED".equals(state)?"NOT_RECOVERABLE":null,PREFIX+"/operations/"+OPERATION,true);
+    }
 
     @BeforeEach void setup() {
         runtime = mock(RuntimeServices.class);
@@ -109,8 +125,8 @@ class PaymentManagementApiOfflineTest {
     }
 
     @Test void listDefaultsAndSignedBigintCursorReachServiceWithOnlyServerScope() throws Exception {
-        when(service.list(OPERATOR, 0, 20)).thenReturn(Map.of("items", List.of()));
-        when(service.list(OPERATOR, Long.MAX_VALUE, 50)).thenReturn(Map.of("items", List.of()));
+        when(service.list(OPERATOR, 0, 20)).thenReturn(new PaymentReviewPageVO(List.of(),null));
+        when(service.list(OPERATOR, Long.MAX_VALUE, 50)).thenReturn(new PaymentReviewPageVO(List.of(),null));
         mvc.perform(get(PREFIX + "/payment-failures").header("Authorization", OPERATOR_TOKEN)).andExpect(status().isOk());
         mvc.perform(get(PREFIX + "/payment-failures").header("Authorization", OPERATOR_TOKEN)
                 .param("afterAttemptId", Long.toString(Long.MAX_VALUE)).param("limit", "50")).andExpect(status().isOk());
@@ -159,10 +175,10 @@ class PaymentManagementApiOfflineTest {
 
     @Test void reasonNormalizationAndUnicodeLengthArePreserved() throws Exception {
         String reason = "\uD83D\uDE00".repeat(200);
-        when(service.recover(OPERATOR, 11, KEY, reason)).thenReturn(Map.of("status", "ACCEPTED"));
+        when(service.recover(OPERATOR, new PaymentRecoveryDTO(11,KEY,reason))).thenReturn(receipt("ACCEPTED"));
         String body = new ObjectMapper().writeValueAsString(Map.of("reason", "  " + reason + "  "));
         mvc.perform(recover(body)).andExpect(status().isAccepted());
-        verify(service).recover(OPERATOR, 11, KEY, reason);
+        verify(service).recover(OPERATOR, new PaymentRecoveryDTO(11,KEY,reason));
         clearInvocations(service);
         invalid(recover(new ObjectMapper().writeValueAsString(Map.of("reason", reason + "a"))));
     }
@@ -211,24 +227,24 @@ class PaymentManagementApiOfflineTest {
 
     @ParameterizedTest @MethodSource("receipts")
     void postStatusFollowsPersistentReceiptWhileQueryAlwaysReturns200(String state, int status) throws Exception {
-        Map<String, Object> receipt = Map.of("operationId", OPERATION, "status", state);
-        when(service.recover(OPERATOR, 11, KEY, "retry")).thenReturn(receipt);
-        when(service.redeliver(OPERATOR, RESULT, KEY, "retry", 3)).thenReturn(receipt);
+        PaymentOperationVO receipt = receipt(state);
+        when(service.recover(OPERATOR, new PaymentRecoveryDTO(11,KEY,"retry"))).thenReturn(receipt);
+        when(service.redeliver(OPERATOR, new PaymentRedeliveryDTO(RESULT,KEY,"retry",3))).thenReturn(receipt);
         when(service.query(OPERATOR, OPERATION)).thenReturn(receipt);
         mvc.perform(recover("{\"reason\":\"  retry  \"}")).andExpect(status().is(status))
                 .andExpect(jsonPath("$.operationId").value(OPERATION)).andExpect(jsonPath("$.status").value(state));
         mvc.perform(redeliver("{\"reason\":\"  retry  \",\"deliveries\":3}")).andExpect(status().is(status));
         mvc.perform(get(PREFIX + "/operations/" + OPERATION).header("Authorization", OPERATOR_TOKEN))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value(state));
-        verify(service).recover(OPERATOR, 11, KEY, "retry");
-        verify(service).redeliver(OPERATOR, RESULT, KEY, "retry", 3);
+        verify(service).recover(OPERATOR, new PaymentRecoveryDTO(11,KEY,"retry"));
+        verify(service).redeliver(OPERATOR, new PaymentRedeliveryDTO(RESULT,KEY,"retry",3));
         verify(service).query(OPERATOR, OPERATION);
         verifyNoMoreInteractions(service);
     }
 
     @Test void errorsDoNotExposeOrSendRawExceptionsToDiagnostics() throws Exception {
         String privateDetail = "Authorization=secret-sensitive-details body=private-reason";
-        when(service.recover(any(), anyLong(), anyString(), anyString())).thenThrow(new IllegalStateException(privateDetail));
+        when(service.recover(any(Operator.class), any(PaymentRecoveryDTO.class))).thenThrow(new IllegalStateException(privateDetail));
         String response = mvc.perform(recover("{\"reason\":\"retry\"}")).andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("DEPENDENCY_UNAVAILABLE")).andReturn().getResponse().getContentAsString();
         assertFalse(response.contains(privateDetail));

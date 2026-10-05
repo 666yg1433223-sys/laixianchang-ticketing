@@ -46,8 +46,8 @@ public final class LocalRuntime implements RuntimeServices, ApplicationListener<
         if (current == null) { throw new ApiFailure(503, "IDENTITY_UNAVAILABLE"); }
         return current.applyAsLong(authorization);
     }
-    @Override public Instant afterLocks(JdbcTemplate jdbc) {
-        return Values.instant(jdbc.queryForObject("SELECT UTC_TIMESTAMP(3)", java.time.LocalDateTime.class));
+    @Override public Instant afterLocks(com.ticketing.booking.domain.DatabaseTimeSource databaseTime) {
+        return databaseTime.now();
     }
     @Override public void at(String boundary, long requestId) { }
     @Override public boolean directEnabled() { return false; }

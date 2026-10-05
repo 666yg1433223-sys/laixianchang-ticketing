@@ -1,5 +1,10 @@
 package com.ticketing.booking.product;
 
+import com.ticketing.booking.messaging.BookingStream;
+import com.ticketing.booking.service.WaitlistService;
+import com.ticketing.booking.recovery.WaitlistScanner;
+import com.ticketing.booking.recovery.RefundScanner;
+
 import com.ticketing.booking.config.Diagnostics;
 import com.ticketing.booking.config.RuntimeServices;
 import com.ticketing.booking.persistence.BookingStore;
@@ -43,7 +48,7 @@ class ProductRecoveryIntegrationTest {
         assertEquals(202,accepted.status(),accepted.body().toString());long request=accepted.body().path("requestId").asLong();assertTrue(request>0);
         long event=h.jdbc.queryForObject("SELECT id FROM outbox_event WHERE event_type='BOOKING_REQUESTED' AND booking_request_id=?",Long.class,request);
         var injections=new AtomicInteger();
-        var failing=new AllocationService(h.ctx.getBean(BookingStore.class),failingAt("AFTER_STOCK",request,injections),
+        var failing=new com.ticketing.booking.service.impl.AllocationServiceImpl(h.ctx.getBean(com.ticketing.booking.repository.AllocationRepository.class),h.ctx.getBean(com.ticketing.booking.repository.DatabaseTimeRepository.class),failingAt("AFTER_STOCK",request,injections),
             h.ctx.getBean(PlatformTransactionManager.class),h.ctx.getBean(Diagnostics.class));
         for(int attempt=1;attempt<=6;attempt++) {
             // Accelerate only this fixture's retry schedule; transaction clocks and deadlines remain real.
@@ -82,7 +87,7 @@ class ProductRecoveryIntegrationTest {
         var accepted=h.call("POST","/v1/orders/"+order+"/payment-attempts",user,Map.of(),key());
         assertEquals(202,accepted.status(),accepted.body().toString());long attempt=accepted.body().path("attemptId").asLong();assertTrue(attempt>0);
         var injections=new AtomicInteger();
-        var failing=new PaymentService(h.ctx.getBean(BookingStore.class),failingAt("P2_AFTER_ORDER",attempt,injections),
+        var failing=new com.ticketing.booking.service.impl.PaymentServiceImpl(h.ctx.getBean(com.ticketing.booking.repository.PaymentRepository.class),h.ctx.getBean(com.ticketing.booking.repository.DatabaseTimeRepository.class),failingAt("P2_AFTER_ORDER",attempt,injections),
             h.ctx.getBean(OrderCloseService.class),h.ctx.getBean(Diagnostics.class),h.ctx.getBean(PlatformTransactionManager.class),true);
         failing.generate(attempt);
         var original=h.jdbc.queryForMap("SELECT result_id,result_status,result_at,result_digest,amount_cent FROM payment_attempt WHERE id=?",attempt);

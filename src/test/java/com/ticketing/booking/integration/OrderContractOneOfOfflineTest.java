@@ -1,5 +1,7 @@
 package com.ticketing.booking.integration;
 
+import java.nio.file.Path;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ticketing.booking.config.Bootstrap;
@@ -15,7 +17,7 @@ class OrderContractOneOfOfflineTest {
     private final OrderContractTest validator = new OrderContractTest();
 
     @BeforeEach void loadStaticContract() throws Exception {
-        validator.spec = validator.json.readTree(Files.readString(Bootstrap.ROOT.resolve("docs/biz04-openapi.json")));
+        validator.spec = validator.json.readTree(Files.readString(Path.of(System.getProperty("user.dir")).resolve("docs/biz04-openapi.json")));
     }
 
     private JsonNode conflictSchema(String route) {

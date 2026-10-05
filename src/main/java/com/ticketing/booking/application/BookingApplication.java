@@ -22,5 +22,12 @@ public class BookingApplication {
     DataSource dataSource(Bootstrap.Ready ready) { return ready.dataSource(); }
 
     @Bean
+    org.springframework.jdbc.core.JdbcTemplate jdbcTemplate(DataSource dataSource) {
+        var jdbc = new org.springframework.jdbc.core.JdbcTemplate(dataSource);
+        jdbc.setQueryTimeout(5);
+        return jdbc;
+    }
+
+    @Bean
     RuntimeServices runtimeServices(Bootstrap.Ready ready) { return ready.runtime(); }
 }

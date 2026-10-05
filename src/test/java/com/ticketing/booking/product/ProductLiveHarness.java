@@ -5,10 +5,13 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.*;
 import com.ticketing.booking.application.BookingApplication;
-import com.ticketing.booking.auth.AuthService;
+import com.ticketing.booking.service.impl.AuthServiceImpl;
 import com.ticketing.booking.catalogue.CatalogueInvalidator;
+import com.ticketing.booking.messaging.BookingStream;
 import com.ticketing.booking.recovery.PaymentRecoveryScanner;
 import com.ticketing.booking.recovery.OrderExpiryScanner;
+import com.ticketing.booking.recovery.RefundScanner;
+import com.ticketing.booking.recovery.WaitlistScanner;
 import com.ticketing.booking.config.Bootstrap;
 import java.net.URI;
 import java.net.http.*;
@@ -40,12 +43,24 @@ public final class ProductLiveHarness implements AutoCloseable {
     private ProductLiveHarness() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeTrue(Boolean.getBoolean("product.live"),"requires -Dproduct.live=true");
         String adminPhone=phone();
-        ctx=new SpringApplication(BookingApplication.class).run("--spring.profiles.active=local-sim","--biz.local.admin-phone="+adminPhone);
+        boolean learning=Boolean.getBoolean("product.learning");
+        String[] arguments=learning?new String[]{
+            "--spring.profiles.active=local-sim", "--biz.learning.enabled=true",
+            "--server.address=127.0.0.1", "--server.port=18082",
+            "--biz.db.name=ticketing_learning", "--biz.db.user=ticketing_learning_app",
+            "--biz.db.migrator=ticketing_learning_migrator", "--biz.db.host=127.0.0.1", "--biz.db.port=13316",
+            "--biz.redis.host=127.0.0.1", "--biz.redis.port=16389",
+            "--biz.simulation.enabled=true", "--biz.sim.management.enabled=false", "--biz.local.run-id=",
+            "--biz.local.admin-phone="+adminPhone
+        }:new String[]{"--spring.profiles.active=local-sim", "--biz.local.admin-phone="+adminPhone};
+        // LearningBootstrap validates these fixed loopback targets and reads credentials only from the environment.
+        ctx=new SpringApplication(BookingApplication.class).run(arguments);
         // Tests drive the same scanners deterministically; production has no disable/test route.
         ctx.getBean(ScheduledAnnotationBeanPostProcessor.class).destroy();
         jdbc=ctx.getBean(JdbcTemplate.class);redis=ctx.getBean(StringRedisTemplate.class);
-        assertEquals("ticketing_biz01",jdbc.queryForObject("SELECT DATABASE()",String.class));
+        assertEquals(learning?"ticketing_learning":"ticketing_biz01",jdbc.queryForObject("SELECT DATABASE()",String.class));
         assertEquals(7,jdbc.queryForObject("SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success=1",Integer.class));
+        assertEquals(7,jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version IS NOT NULL",Integer.class));
         admin=login(adminPhone);
         assertEquals("ADMIN",call("GET","/v1/auth/me",admin,null,null).body().path("role").asText());
     }
@@ -62,7 +77,7 @@ public final class ProductLiveHarness implements AutoCloseable {
         return new Reply(reply.statusCode(),reply.body().isBlank()?json.nullNode():json.readTree(reply.body()),reply.headers());
     }
     private Token login(String phone) throws Exception {
-        Logger log=(Logger)LoggerFactory.getLogger(AuthService.class);
+        Logger log=(Logger)LoggerFactory.getLogger(AuthServiceImpl.class);
         var messages=new ListAppender<ILoggingEvent>();messages.start();boolean additive=log.isAdditive();
         log.setAdditive(false);log.addAppender(messages);
         try {

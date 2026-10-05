@@ -213,8 +213,8 @@ public final class TestRuntime implements RuntimeServices,com.ticketing.booking.
         if (("Bearer " + tokenB).equals(header)) { return userB; }
         throw new IllegalArgumentException("UNAUTHENTICATED");
     }
-    @Override public Instant afterLocks(JdbcTemplate jdbc) {
-        Instant actual = jdbc.queryForObject("SELECT UTC_TIMESTAMP(3)", java.sql.Timestamp.class).toInstant();
+    @Override public Instant afterLocks(com.ticketing.booking.domain.DatabaseTimeSource databaseTime) {
+        Instant actual = databaseTime.now();
         at("CLOCK_AFTER_LOCKS", 0);
         return fixedTime == null ? actual : fixedTime;
     }

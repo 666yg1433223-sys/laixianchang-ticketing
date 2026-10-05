@@ -1,5 +1,10 @@
 package com.ticketing.booking.product;
 
+import com.ticketing.booking.messaging.BookingStream;
+import com.ticketing.booking.service.WaitlistService;
+import com.ticketing.booking.recovery.WaitlistScanner;
+import com.ticketing.booking.recovery.RefundScanner;
+
 import com.ticketing.booking.service.*;
 import java.util.*;
 import org.junit.jupiter.api.*;

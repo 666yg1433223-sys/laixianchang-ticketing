@@ -12,8 +12,10 @@ class DemoClasspathOfflineTest {
         for(String item:classpath.split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) {
             Path p=Path.of(item).toAbsolutePath().normalize();
             assertTrue(Files.exists(p));
-            assertTrue(p.equals(Bootstrap.ROOT.resolve("target/classes")) || p.equals(Bootstrap.ROOT.resolve("target/test-classes"))
-                || p.startsWith(Bootstrap.ROOT.resolve(".m2")),"Unexpected classpath origin");
+            Path project = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+            Path repository = Path.of(System.getProperty("maven.repo.local", System.getProperty("user.home") + "/.m2/repository")).toAbsolutePath().normalize();
+            assertTrue(p.equals(project.resolve("target/classes")) || p.equals(project.resolve("target/test-classes"))
+                || p.startsWith(repository),"Unexpected classpath origin");
         }
         String destination=System.getProperty("demo.classpathFile");
         if(destination==null) return;

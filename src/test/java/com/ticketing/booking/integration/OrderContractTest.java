@@ -86,7 +86,7 @@ class OrderContractTest {
     }
 
     @Test void staticContractMatchesActualRoutesBodiesAndDatabaseChecks() throws Exception {
-        spec = json.readTree(Files.readString(Bootstrap.ROOT.resolve("docs/biz04-openapi.json")));
+        spec = json.readTree(Files.readString(Path.of(System.getProperty("user.dir")).resolve("docs/biz04-openapi.json")));
         assertEquals("3.1.0", spec.path("openapi").asText());
         try (var h = new BookingHarness(System.getProperty("biz.runId") + "-contract")) {
             Set<String> expected = new TreeSet<>();

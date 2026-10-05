@@ -344,7 +344,7 @@ class PaymentRegressionTest {
         }
         long good=h.jdbc.queryForObject("SELECT id FROM payment_attempt WHERE session_id=?",Long.class,used.get(20).session());
         h.runtime.fixedTime=BASE.plusSeconds(300);h.runtime.recovery=false;
-        var scanner=new PaymentRecoveryScanner(h.store,h.runtime,payment(),h.app.getBean(Diagnostics.class));
+        var scanner=new PaymentRecoveryScanner(new com.ticketing.booking.repository.RecoveryRepository(h.jdbc),new com.ticketing.booking.repository.DatabaseTimeRepository(h.jdbc),h.runtime,payment(),h.app.getBean(Diagnostics.class));
         var observed=new ConcurrentLinkedQueue<Long>();
         h.runtime.hooks.put("P1_LOCKS_ACQUIRED",id->{observed.add(id);if(badIds.contains(id))throw new IllegalStateException("INJECTED_BOUNDED_GENERATOR_FAILURE");});
         for(int i=0;i<8 && "PENDING".equals(row(good).get("result_status"));i++){int before=observed.size();scanner.generateOnce();assertTrue(observed.size()-before<=20);}

@@ -1,5 +1,10 @@
 package com.ticketing.booking.product;
 
+import com.ticketing.booking.messaging.BookingStream;
+import com.ticketing.booking.service.WaitlistService;
+import com.ticketing.booking.recovery.WaitlistScanner;
+import com.ticketing.booking.recovery.RefundScanner;
+
 import com.ticketing.booking.config.Diagnostics;
 import com.ticketing.booking.config.RuntimeServices;
 import com.ticketing.booking.domain.ApiFailure;
@@ -47,7 +52,7 @@ class ProductRefundIntegrationTest {
     private String refundPath(long order) { return "/v1/orders/"+order+"/refunds"; }
     private RefundService refunds() { return h.ctx.getBean(RefundService.class); }
     private RefundService service(RuntimeServices runtime) {
-        return new RefundService(h.ctx.getBean(BookingStore.class),runtime,h.ctx.getBean(OrderCloseService.class),
+        return new com.ticketing.booking.service.impl.RefundServiceImpl(h.ctx.getBean(com.ticketing.booking.repository.RefundRepository.class),h.ctx.getBean(com.ticketing.booking.repository.PaymentRepository.class),h.ctx.getBean(com.ticketing.booking.repository.DatabaseTimeRepository.class),runtime,h.ctx.getBean(OrderCloseService.class),
             h.ctx.getBean(Diagnostics.class),h.ctx.getBean(PlatformTransactionManager.class),true);
     }
     private RuntimeServices runtime(Instant clock, BiConsumer<String,Long> hook) {
@@ -214,7 +219,7 @@ class ProductRefundIntegrationTest {
             }));
             if(offsetMillis<0) {
                 var accepted=controlled.accept(buyer.userId(),paid.order(),key(),"开场前最后一毫秒");
-                long refund=Long.parseLong(accepted.get("refundId").toString());assertTrue(refund>0);
+                long refund=Long.parseLong(accepted.refundId());assertTrue(refund>0);
                 pendingOwnsInventory(paid,refund);
                 // The request was accepted before start; completion may follow later.
                 service(runtime(start.plusSeconds(1),null)).settle(refund);

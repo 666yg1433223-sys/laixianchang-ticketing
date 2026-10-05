@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ticketing.booking.domain.ApiFailure;
 import com.ticketing.booking.domain.Values;
+import com.ticketing.booking.model.dto.CatalogueEventDTO;
+import com.ticketing.booking.model.dto.CatalogueSessionDTO;
+import com.ticketing.booking.model.dto.CatalogueTierDTO;
 import java.time.Instant;
 import java.util.Set;
 
@@ -55,6 +58,27 @@ public final class CatalogueInput {
         if(value==null) { return fallback; }
         if(!value.matches("[1-9][0-9]{0,4}")) { throw invalid(); }
         int number=Integer.parseInt(value); if(number>maximum) { throw invalid(); } return number;
+    }
+    public static CatalogueEventDTO eventFields(JsonNode input, boolean creating) {
+        return new CatalogueEventDTO(
+            input.has("title") ? text(input,"title",128,false) : null,
+            input.has("description") ? text(input,"description",5000,true) : creating ? "" : null,
+            input.has("venueText") ? text(input,"venueText",255,true) : creating ? "" : null);
+    }
+    public static CatalogueSessionDTO sessionFields(JsonNode input) {
+        return new CatalogueSessionDTO(
+            input.has("eventId") ? id(input,"eventId") : null,
+            input.has("startAt") ? instant(input,"startAt") : null,
+            input.has("bookingOpenAt") ? instant(input,"bookingOpenAt") : null,
+            input.has("bookingCloseAt") ? instant(input,"bookingCloseAt") : null);
+    }
+    public static CatalogueTierDTO tierFields(JsonNode input, boolean creating) {
+        return new CatalogueTierDTO(
+            input.has("sessionId") ? id(input,"sessionId") : null,
+            input.has("name") ? text(input,"name",64,false) : null,
+            input.has("areaLabel") ? text(input,"areaLabel",64,true) : creating ? "" : null,
+            input.has("capacity") ? integer(input,"capacity",1,1_000_000) : null,
+            input.has("unitPriceCent") ? integer(input,"unitPriceCent",1,1_000_000) : null);
     }
     public static void window(Instant open,Instant close,Instant start,Instant now) {
         if(!open.isBefore(close)||!close.isBefore(start)||!now.isBefore(close)) { throw new ApiFailure(400,"INVALID_BOOKING_WINDOW"); }

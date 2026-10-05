@@ -70,6 +70,6 @@ class LocalBootstrapOfflineTest {
         var jdbc = mock(JdbcTemplate.class);
         when(jdbc.queryForObject("SELECT UTC_TIMESTAMP(3)", LocalDateTime.class))
             .thenReturn(LocalDateTime.parse("2026-09-13T04:00:00.123"));
-        assertEquals(Instant.parse("2026-09-13T04:00:00.123Z"), new LocalRuntime(true).afterLocks(jdbc));
+        assertEquals(Instant.parse("2026-09-13T04:00:00.123Z"), new LocalRuntime(true).afterLocks(new com.ticketing.booking.repository.DatabaseTimeRepository(jdbc)));
     }
 }

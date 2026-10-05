@@ -2,7 +2,9 @@ package com.ticketing.booking.recovery;
 
 import com.ticketing.booking.config.Diagnostics;
 import com.ticketing.booking.config.RuntimeServices;
-import com.ticketing.booking.persistence.BookingStore;
+import com.ticketing.booking.repository.RecoveryRepository;
+import com.ticketing.booking.repository.DatabaseTimeRepository;
+import com.ticketing.booking.service.WaitlistService;
 import com.ticketing.booking.service.OrderCloseService;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -12,16 +14,17 @@ import static com.ticketing.booking.domain.Values.sqlTime;
 
 @Component
 public class OrderExpiryScanner {
-    private final BookingStore store;
+    private final RecoveryRepository repository;
     private final RuntimeServices runtime;
+    private final DatabaseTimeRepository clock;
     private final OrderCloseService close;
     private final Diagnostics diagnostics;
     private long cursor;
     private long sweepUpper;
     public final AtomicLong failedCloses = new AtomicLong();
 
-    public OrderExpiryScanner(BookingStore store, RuntimeServices runtime, OrderCloseService close, Diagnostics diagnostics) {
-        this.store = store; this.runtime = runtime; this.close = close; this.diagnostics = diagnostics;
+    public OrderExpiryScanner(RecoveryRepository repository,DatabaseTimeRepository clock, RuntimeServices runtime, OrderCloseService close, Diagnostics diagnostics) {
+        this.repository = repository; this.clock=clock; this.runtime = runtime; this.close = close; this.diagnostics = diagnostics;
     }
 
     @Scheduled(fixedDelay = 1000, initialDelay = 1000)
@@ -46,11 +49,10 @@ public class OrderExpiryScanner {
     // a permanently bad first page cannot starve later IDs, nor can incoming IDs prevent wrap-around.
     private synchronized List<Long> candidates() {
         if (cursor == 0) {
-            sweepUpper = store.jdbc().queryForObject("SELECT COALESCE(MAX(id),0) FROM booking_order", Long.class);
+            sweepUpper = repository.latestOrderId();
         }
-        var now = sqlTime(runtime.afterLocks(store.jdbc()));
-        var ids = store.jdbc().queryForList("SELECT id FROM booking_order WHERE status='HOLD' AND pay_expires_at<=? AND id>? AND id<=? ORDER BY id LIMIT 20",
-                Long.class, now, cursor, sweepUpper);
+        var now = sqlTime(runtime.afterLocks(clock));
+        var ids = repository.expiredOrderCandidates(cursor,sweepUpper,now);
         cursor = ids.size() < 20 ? 0 : ids.get(ids.size() - 1);
         return ids;
     }

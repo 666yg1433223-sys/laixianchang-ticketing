@@ -1,5 +1,10 @@
 package com.ticketing.booking.product;
 
+import com.ticketing.booking.messaging.BookingStream;
+import com.ticketing.booking.service.WaitlistService;
+import com.ticketing.booking.recovery.WaitlistScanner;
+import com.ticketing.booking.recovery.RefundScanner;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ticketing.booking.catalogue.CatalogueCache;
 import java.time.Instant;

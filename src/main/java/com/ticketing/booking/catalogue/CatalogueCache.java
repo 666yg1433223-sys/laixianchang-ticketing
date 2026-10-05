@@ -1,10 +1,10 @@
 package com.ticketing.booking.catalogue;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ticketing.booking.domain.ApiFailure;
+import com.ticketing.booking.model.vo.EventDetailVO;
+import com.ticketing.booking.model.vo.SessionTiersVO;
 import java.time.Duration;
-import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -26,40 +26,41 @@ public class CatalogueCache {
     private final ObjectMapper json=new ObjectMapper();
     private final Semaphore databaseSlots=new Semaphore(8,true);
     public CatalogueCache(StringRedisTemplate redis,RedissonClient redisson) { this.redis=redis;this.redisson=redisson; }
-    public Map<String,Object> event(long id,Supplier<Map<String,Object>> loader) {
-        return read("event:"+id,Duration.ofSeconds(ThreadLocalRandom.current().nextInt(60,91)),loader);
+    public EventDetailVO event(long id,Supplier<EventDetailVO> loader) {
+        return read("event:"+id,Duration.ofSeconds(ThreadLocalRandom.current().nextInt(60,91)),EventDetailVO.class,loader);
     }
-    public Map<String,Object> tiers(long id,Supplier<Map<String,Object>> loader) {
-        return read("tiers:"+id,Duration.ofSeconds(5),loader);
+    public SessionTiersVO tiers(long id,Supplier<SessionTiersVO> loader) {
+        return read("tiers:"+id,Duration.ofSeconds(5),SessionTiersVO.class,loader);
     }
     public <T> T boundedDatabase(Supplier<T> loader) {
         if(!databaseSlots.tryAcquire()) { throw new ApiFailure(503,"CATALOGUE_BUSY",1); }
         try { return loader.get(); } finally { databaseSlots.release(); }
     }
-    private record Hit(boolean present,Map<String,Object> data) { }
-    private Hit get(String key) {
+    private record Hit<T>(boolean present,T data) { }
+    private record Envelope<T>(int version,T data) { }
+    private <T> Hit<T> get(String key,Class<T> type) {
         String raw=redis.opsForValue().get(key);
-        if(raw==null) { return new Hit(false,null); }
-        if(ABSENT.equals(raw)) { return new Hit(true,null); }
+        if(raw==null) { return new Hit<>(false,null); }
+        if(ABSENT.equals(raw)) { return new Hit<>(true,null); }
         try {
             var tree=json.readTree(raw);
             if(!tree.isObject()||tree.path("version").asInt()!=1||!tree.path("data").isObject()) { throw new IllegalArgumentException(); }
-            return new Hit(true,json.convertValue(tree.get("data"),new TypeReference<Map<String,Object>>(){}));
-        } catch(Exception invalid) { redis.delete(key);return new Hit(false,null); }
+            return new Hit<>(true,json.treeToValue(tree.get("data"),type));
+        } catch(Exception invalid) { redis.delete(key);return new Hit<>(false,null); }
     }
-    private Map<String,Object> read(String suffix,Duration ttl,Supplier<Map<String,Object>> loader) {
+    private <T> T read(String suffix,Duration ttl,Class<T> type,Supplier<T> loader) {
         String key=PREFIX+suffix;
         RLock lock=null; boolean acquired=false,sourceStarted=false;
         try {
-            Hit hit=get(key); if(hit.present()) { return visible(hit.data()); }
+            Hit<T> hit=get(key,type); if(hit.present()) { return visible(hit.data()); }
             lock=redisson.getLock("booking:local:lock:"+suffix);
             acquired=lock.tryLock(200,8_000,TimeUnit.MILLISECONDS);
-            hit=get(key); if(hit.present()) { return visible(hit.data()); }
+            hit=get(key,type); if(hit.present()) { return visible(hit.data()); }
             if(!acquired) { throw new ApiFailure(503,"CATALOGUE_BUSY",1); }
             sourceStarted=true;
-            Map<String,Object> loaded=boundedDatabase(loader);
+            T loaded=boundedDatabase(loader);
             try {
-                redis.opsForValue().set(key,loaded==null?ABSENT:json.writeValueAsString(Map.of("version",1,"data",loaded)),
+                redis.opsForValue().set(key,loaded==null?ABSENT:json.writeValueAsString(new Envelope<>(1,loaded)),
                     loaded==null?Duration.ofSeconds(15):ttl);
             } catch(Exception ignored) { /* The source result is valid; failed cache writes are not transaction failures. */ }
             return visible(loaded);
@@ -75,7 +76,7 @@ public class CatalogueCache {
             }
         }
     }
-    private Map<String,Object> visible(Map<String,Object> data) {
+    private <T> T visible(T data) {
         if(data==null) { throw new ApiFailure(404,"RESOURCE_NOT_FOUND"); }
         return data;
     }

@@ -1,14 +1,27 @@
 package com.ticketing.booking.config;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
 public class Diagnostics {
-    private final Bootstrap.Ready ready;
+    private final Path directory;
     private int written;
-    public Diagnostics(Bootstrap.Ready ready) { this.ready=ready; }
+    @Autowired
+    public Diagnostics(Bootstrap.Ready ready) { this(ready,Path.of(System.getProperty("user.dir"))); }
+
+    Diagnostics(Bootstrap.Ready ready,Path projectRoot) { this.directory=logDirectory(ready,projectRoot); }
+
+    static Path logDirectory(Bootstrap.Ready ready,Path projectRoot) {
+        if(ready.runtime().productEnabled() && "learning".equals(ready.runId())) {
+            // The portable launcher starts in its project root. Never reuse the old private .local path.
+            return projectRoot.toAbsolutePath().normalize().resolve("evidence/learning");
+        }
+        return ready.runtime().productEnabled()?Bootstrap.ROOT.resolve(".local/logs"):Bootstrap.evidenceDirectory(ready.runId());
+    }
     public synchronized void record(Throwable failure) {
         if(written>=200) { return; }
         try {
@@ -21,7 +34,6 @@ public class Diagnostics {
                     "IDEMPOTENCY_CONFLICT","OPERATION_ACCEPTANCE_UNKNOWN","DEPENDENCY_UNAVAILABLE")) {
                 if(message!=null && (message.equals(allowed) || message.startsWith(allowed+":") || message.startsWith(allowed+" "))) { code=allowed;break; }
             }
-            var directory=ready.runtime().productEnabled()?Bootstrap.ROOT.resolve(".local/logs"):Bootstrap.evidenceDirectory(ready.runId());
             Files.createDirectories(directory);
             Files.writeString(directory.resolve("application-errors.log"),java.time.Instant.now()+" "+code+" "+failure.getClass().getSimpleName()+System.lineSeparator(),
                 StandardOpenOption.CREATE,StandardOpenOption.APPEND);
