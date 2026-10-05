@@ -1,0 +1,40 @@
+name: ticketing-learning
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TICKETING_MYSQL_ROOT_PASSWORD:?Run scripts/run-learning.ps1 -Action Init first}
+      MYSQL_ROOT_HOST: localhost
+      TICKETING_DB_PASSWORD: ${TICKETING_DB_PASSWORD:?Missing TICKETING_DB_PASSWORD in .env}
+      TICKETING_MIGRATOR_PASSWORD: ${TICKETING_MIGRATOR_PASSWORD:?Missing TICKETING_MIGRATOR_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:13316:3306"
+    volumes:
+      - learning-mysql:/var/lib/mysql
+      - ./infra/learning/mysql-init.sh:/docker-entrypoint-initdb.d/10-ticketing.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysql --protocol=socket -uroot --batch --skip-column-names -e 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    environment:
+      REDIS_PASSWORD: ${TICKETING_REDIS_PASSWORD:?Missing TICKETING_REDIS_PASSWORD in .env}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    ports:
+      - "127.0.0.1:16389:6379"
+    volumes:
+      - learning-redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  learning-mysql:
+  learning-redis:

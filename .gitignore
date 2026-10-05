@@ -5,3 +5,15 @@ evidence/
 *.log
 .idea/
 *.iml
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.key
+*.pem
+.vscode/
+.DS_Store
+Thumbs.db

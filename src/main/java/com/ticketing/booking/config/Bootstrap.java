@@ -22,6 +22,9 @@ public final class Bootstrap {
     private Bootstrap() { }
 
     public static Ready prepare(Environment env) {
+        if (LearningBootstrap.enabled(env)) {
+            return LearningBootstrap.prepare(env);
+        }
         if (Arrays.equals(env.getActiveProfiles(), new String[]{"local-sim"})) {
             return LocalBootstrap.prepare(env);
         }
