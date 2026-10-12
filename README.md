@@ -6,6 +6,40 @@
 
 短信、付款与退款都是模拟，不接真实短信服务、资金或固定选座。这个入口只允许本机访问，用于学习与演示。
 
+## 系统截图
+
+以下为当前前端的实际浏览器截图：桌面宽度 1440px、手机宽度 375px。活动、账号和订单来自前端回归测试的模拟数据，用于展示页面与交互，不代表真实交易或已完成后端集成验证。
+
+**发现活动 · 电脑端**
+
+![电脑端活动首页：墨绿票券主题、活动搜索及活动卡片](docs/screenshots/discover-desktop.png)
+
+**选票与模拟退款 · 手机端**
+
+<table>
+  <tr>
+    <th>选择场次与票档</th>
+    <th>申请模拟退款</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/detail-mobile.png" alt="手机选票弹窗：场次选择、票价及购票与候补操作" width="300"></td>
+    <td><img src="docs/screenshots/refund-mobile.png" alt="手机模拟退款界面：退款金额、后果说明和退款原因" width="300"></td>
+  </tr>
+</table>
+
+<details>
+<summary>展开查看电脑端票夹与活动管理</summary>
+
+**我的票夹**
+
+![电脑端票夹：已付款与待付款订单、付款期限及退款入口](docs/screenshots/wallet-desktop.png)
+
+**活动管理**
+
+![电脑端活动管理：活动、场次、票档与管理操作](docs/screenshots/admin-desktop.png)
+
+</details>
+
 ## 快速启动
 
 准备 **JDK 17、Maven 3.9+、Docker Compose、PowerShell 7.2+**。确认 `java -version`、`mvn -version`、`docker compose version` 和 `pwsh --version` 可运行，Docker 已启动。首次构建和容器拉取需要联网。
