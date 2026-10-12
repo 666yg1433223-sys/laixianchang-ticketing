@@ -1,3 +1,10 @@
+
+# Local environment credentials
+.env
+.env.*
+!.env.example
+
+# Build outputs and local development files
 .local/
 .m2/
 target/
@@ -5,9 +12,6 @@ evidence/
 *.log
 .idea/
 *.iml
-.env
-.env.*
-!.env.example
 *.p12
 *.pfx
 *.jks

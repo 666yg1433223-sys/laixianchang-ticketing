@@ -125,7 +125,29 @@ com.ticketing.booking
 
 数据库迁移按 V1～V7 逐步演进，已应用的 SQL 不应直接改写；新增结构用新的迁移版本。网页接口返回的 ID 使用字符串，金额使用整数分；Redis 展示余量可能短暂滞后，交易是否成功最终以 MySQL 中的订单状态为准。
 
+## 前端界面与交互
+
+前端仍由 Spring Boot 直接提供原生 HTML、CSS 和 JavaScript，无需单独的前端构建服务。发现活动、详情选票、票夹、登录及管理页共用墨绿与纸白的票券视觉，适配手机与桌面，支持键盘焦点、弹窗内 Tab 循环、Escape 关闭和减少动态效果偏好。
+
+- 发现页可按活动名称或场馆筛选**当前页已加载的活动**，搜索框会说明页码；不是服务端全库搜索。
+- 加载失败、未发布场次和搜索无结果都有明确提示及下一步操作。较早发出的详情或页面请求不会覆盖后来打开的弹窗或页面。
+- 票夹自动刷新会暂缓替换正在操作的控件；取消订单或候补前需要确认。购票与退款重试继续沿用原请求的幂等键，受理提示与最终交易状态分开显示。
+- 本地验证码提示同时说明 Mac 终端取码与 Windows 脚本取码方式；付款、退款依然是本地模拟。
+
+设计参考使用 [Anthropic 官方 frontend-design skill](https://github.com/anthropics/skills/tree/dbd4588f9e1033efb41dad4bef2f7947c8993d44/skills/frontend-design)，该 skill 是开发辅助资料，不是网站运行依赖。
+
 ## 构建与测试
+
+前端行为回归见 [frontend-smoke.mjs](scripts/frontend-smoke.mjs)。需要 Node.js 20+、Playwright 和 Chromium（或 Microsoft Edge）。例如在 macOS / Linux 中临时安装测试工具后运行：
+
+```sh
+ui_tools_dir="$(mktemp -d)"
+npm install --prefix "$ui_tools_dir" --no-package-lock playwright@1.62.1
+"$ui_tools_dir/node_modules/.bin/playwright" install chromium
+PLAYWRIGHT_MODULE_PATH="$ui_tools_dir/node_modules/playwright" node scripts/frontend-smoke.mjs
+```
+
+已有 Playwright 时可直接 `node scripts/frontend-smoke.mjs`，共享安装则用 `PLAYWRIGHT_MODULE_PATH` 指向包目录；用现有 Chromium / Edge 时，额外设置 `BROWSER_EXECUTABLE` 为浏览器可执行文件路径。脚本使用临时浏览器配置和模拟 `/v1` 响应，检查手机 / 桌面布局、搜索、登录、选票、票夹、退款、取消确认、管理界面、请求竞态和幂等重试。截图及结果写入已忽略的 `evidence/frontend/`。这些检查不连接业务库，也不能替代真实后端集成测试。
 
 ```powershell
 # 不连接 MySQL / Redis 的离线测试
